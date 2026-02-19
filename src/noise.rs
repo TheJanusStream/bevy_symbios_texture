@@ -51,27 +51,55 @@ impl<N: NoiseFn<f64, 4>> ToroidalNoise<N> {
     pub fn get_offset(&self, u: f64, v: f64, du: f64, dv: f64) -> f64 {
         self.get(u + du, v + dv)
     }
+
+    /// Sample the noise at pre-projected 4D torus coordinates.
+    ///
+    /// Use this with lookup tables (see [`sample_grid`]) to avoid recomputing
+    /// `sin`/`cos` for every sample in a regular grid.
+    #[inline]
+    pub fn get_precomputed(&self, nx: f64, ny: f64, nz: f64, nw: f64) -> f64 {
+        self.noise.get([nx, ny, nz, nw])
+    }
 }
 
 /// Convenience: iterate over a `width × height` grid and collect samples.
 ///
 /// Returns a `Vec<f64>` of length `width * height`, values in `[-1, 1]`.
+///
+/// Torus coordinates are precomputed into lookup tables of size `W` and `H`,
+/// reducing trigonometric calls from `O(W × H)` to `O(W + H)`.
 pub fn sample_grid<N: NoiseFn<f64, 4>>(
     noise: &ToroidalNoise<N>,
     width: u32,
     height: u32,
 ) -> Vec<f64> {
-    let w = width as f64;
-    let h = height as f64;
-    (0..height)
-        .flat_map(|y| {
-            (0..width).map(move |x| {
-                let u = x as f64 / w;
-                let v = y as f64 / h;
-                noise.get(u, v)
-            })
-        })
-        .collect()
+    let w = width as usize;
+    let h = height as usize;
+    let freq = noise.frequency;
+
+    // One sin/cos pair per column and per row instead of per pixel.
+    let col_cos: Vec<f64> = (0..w)
+        .map(|x| (TAU * x as f64 / w as f64).cos() * freq)
+        .collect();
+    let col_sin: Vec<f64> = (0..w)
+        .map(|x| (TAU * x as f64 / w as f64).sin() * freq)
+        .collect();
+    let row_cos: Vec<f64> = (0..h)
+        .map(|y| (TAU * y as f64 / h as f64).cos() * freq)
+        .collect();
+    let row_sin: Vec<f64> = (0..h)
+        .map(|y| (TAU * y as f64 / h as f64).sin() * freq)
+        .collect();
+
+    let mut out = Vec::with_capacity(w * h);
+    for y in 0..h {
+        let nz = row_cos[y];
+        let nw = row_sin[y];
+        for x in 0..w {
+            out.push(noise.get_precomputed(col_cos[x], col_sin[x], nz, nw));
+        }
+    }
+    out
 }
 
 /// Map a raw noise sample from `[-1, 1]` to an unsigned byte `[0, 255]`.

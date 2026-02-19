@@ -80,15 +80,17 @@ impl TextureGenerator for RockGenerator {
             albedo[ai + 3] = 255;
 
             // Ridges (high t) are slightly smoother (exposed mineral); cracks rougher.
+            // glTF / Bevy StandardMaterial reads roughness from the Green channel.
             let rough = 0.75 - t * 0.25;
-            roughness[ai] = (rough * 255.0) as u8;
-            roughness[ai + 1] = 0;
+            roughness[ai] = 0;
+            roughness[ai + 1] = (rough * 255.0) as u8;
             roughness[ai + 2] = 0;
             roughness[ai + 3] = 255;
         }
 
-        let normal_heights: Vec<f64> = heights.iter().map(|&v| normalize(v)).collect();
-        let normal = height_to_normal(&normal_heights, width, height, c.normal_strength);
+        // heights is in [-1, 1]; normalize would scale gradients by 0.5.
+        // Halving strength here is equivalent and avoids a full-sized allocation.
+        let normal = height_to_normal(&heights, width, height, c.normal_strength * 0.5);
 
         TextureMap {
             albedo,
@@ -105,7 +107,14 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
 }
 
+/// Linear → sRGB using the standard piecewise IEC 61966-2-1 transfer function.
 #[inline]
 fn linear_to_srgb(linear: f32) -> u8 {
-    (linear.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8
+    let c = linear.clamp(0.0, 1.0);
+    let encoded = if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0) as u8
 }

@@ -29,14 +29,14 @@ pub fn height_to_normal(heights: &[f64], width: u32, height: u32, strength: f32)
             let ym = (y + h - 1) % h;
             let yp = (y + 1) % h;
 
-            let left = heights[ym * w + x];
-            let right = heights[yp * w + x];
-            let up = heights[y * w + xm];
-            let down = heights[y * w + xp];
+            let left = heights[y * w + xm]; // x - 1
+            let right = heights[y * w + xp]; // x + 1
+            let above = heights[ym * w + x]; // y - 1
+            let below = heights[yp * w + x]; // y + 1
 
             // Central difference gradient.
-            let dx = (down - up) * s;
-            let dy = (right - left) * s;
+            let dx = (right - left) * s;
+            let dy = (below - above) * s;
 
             // Normal = normalize(-dx, -dy, 1).
             let len = (dx * dx + dy * dy + 1.0).sqrt();

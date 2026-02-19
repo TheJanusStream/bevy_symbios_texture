@@ -29,22 +29,25 @@ pub trait TextureGenerator {
 }
 
 /// Upload a [`TextureMap`] into [`Assets<Image>`] with repeat-wrapping samplers.
-pub fn map_to_images(map: &TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
+///
+/// Takes `map` by value to move the pixel buffers directly into the `Image`
+/// assets, avoiding an extra copy of up to 3 × W × H × 4 bytes.
+pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
     GeneratedHandles {
         albedo: images.add(make_image(
-            map.albedo.clone(),
+            map.albedo,
             map.width,
             map.height,
             TextureFormat::Rgba8UnormSrgb,
         )),
         normal: images.add(make_image(
-            map.normal.clone(),
+            map.normal,
             map.width,
             map.height,
             TextureFormat::Rgba8Unorm,
         )),
         roughness: images.add(make_image(
-            map.roughness.clone(),
+            map.roughness,
             map.width,
             map.height,
             TextureFormat::Rgba8Unorm,

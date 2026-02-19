@@ -109,10 +109,11 @@ impl TextureGenerator for BarkGenerator {
                 albedo[ai + 3] = 255;
 
                 // Roughness: grooves (dark, low t) are rougher.
+                // glTF / Bevy StandardMaterial reads roughness from the Green channel.
                 let rough = 0.6 + (1.0 - t as f32) * 0.35;
                 let ri = idx * 4;
-                roughness[ri] = (rough * 255.0) as u8;
-                roughness[ri + 1] = 0;
+                roughness[ri] = 0;
+                roughness[ri + 1] = (rough * 255.0) as u8;
                 roughness[ri + 2] = 0;
                 roughness[ri + 3] = 255;
             }
@@ -137,8 +138,14 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
 }
 
-/// Approximate linear → sRGB gamma (power 2.2 approximation).
+/// Linear → sRGB using the standard piecewise IEC 61966-2-1 transfer function.
 #[inline]
 fn linear_to_srgb(linear: f32) -> u8 {
-    (linear.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8
+    let c = linear.clamp(0.0, 1.0);
+    let encoded = if c <= 0.0031308 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0) as u8
 }

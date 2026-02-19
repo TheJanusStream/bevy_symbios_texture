@@ -4,6 +4,6 @@ Cargo.lock
 /.claude
 /.chainlink
 CHANGELOG.md
-bevy_symbios_ground-primer.sh
-bevy_symbios_ground_primer_*
+bevy_symbios_texture-primer.sh
+bevy_symbios_texture_primer_*
 .mcp.json

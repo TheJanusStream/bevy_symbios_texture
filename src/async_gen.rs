@@ -68,7 +68,7 @@ pub fn poll_texture_tasks(
 ) {
     for (entity, mut pending) in &mut tasks {
         if let Some(map) = block_on(future::poll_once(&mut pending.0)) {
-            let handles = map_to_images(&map, &mut images);
+            let handles = map_to_images(map, &mut images);
             commands
                 .entity(entity)
                 .remove::<PendingTexture>()
