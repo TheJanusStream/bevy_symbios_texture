@@ -10,13 +10,8 @@ repository = "https://github.com/TheJanusStream/bevy_symbios_texture"
 keywords = ["terrain", "procedural", "generative", "simulation"]
 categories = ["simulation", "game-development", "mathematics"]
 
-[features]
-default = []
-egui = ["dep:bevy_egui"]
-
 [dependencies]
 bevy = "0.18"
-bevy_egui = { version = "0.39", optional = true }
 noise = "0.9"
 
 [dev-dependencies]

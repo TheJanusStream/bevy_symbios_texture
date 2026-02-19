@@ -55,13 +55,10 @@ fn spawn_tasks(mut commands: Commands) {
 fn show_ready_textures(
     mut commands: Commands,
     ready: Query<(Entity, &TextureReady, &TextureSlot)>,
-    mut shown: Local<Vec<Entity>>,
 ) {
     for (entity, ready_tex, slot) in &ready {
-        if shown.contains(&entity) {
-            continue;
-        }
-        shown.push(entity);
+        // Despawn the task entity so this query won't match it again next frame.
+        commands.entity(entity).despawn();
 
         let x = (slot.0 as f32 - 1.0) * SPACING;
 

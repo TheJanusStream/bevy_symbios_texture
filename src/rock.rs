@@ -6,7 +6,7 @@
 use noise::{MultiFractal, Perlin, RidgedMulti};
 
 use crate::{
-    generator::{TextureGenerator, TextureMap},
+    generator::{TextureGenerator, TextureMap, validate_dimensions},
     noise::{ToroidalNoise, normalize, sample_grid},
     normal::height_to_normal,
 };
@@ -53,6 +53,7 @@ impl RockGenerator {
 
 impl TextureGenerator for RockGenerator {
     fn generate(&self, width: u32, height: u32) -> TextureMap {
+        validate_dimensions(width, height);
         let c = &self.config;
 
         let ridged: RidgedMulti<Perlin> = RidgedMulti::new(c.seed)
@@ -62,7 +63,7 @@ impl TextureGenerator for RockGenerator {
         let noise = ToroidalNoise::new(ridged, c.scale);
         let heights = sample_grid(&noise, width, height);
 
-        let n = (width * height) as usize;
+        let n = (width as usize) * (height as usize);
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
 
@@ -80,11 +81,11 @@ impl TextureGenerator for RockGenerator {
             albedo[ai + 3] = 255;
 
             // Ridges (high t) are slightly smoother (exposed mineral); cracks rougher.
-            // glTF / Bevy StandardMaterial reads roughness from the Green channel.
+            // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
             let rough = 0.75 - t * 0.25;
-            roughness[ai] = 0;
+            roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
             roughness[ai + 1] = (rough * 255.0) as u8;
-            roughness[ai + 2] = 0;
+            roughness[ai + 2] = 0; // Metallic = 0.0
             roughness[ai + 3] = 255;
         }
 

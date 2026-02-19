@@ -7,7 +7,7 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureGenerator, TextureMap},
+    generator::{TextureGenerator, TextureMap, validate_dimensions},
     noise::{ToroidalNoise, normalize},
     normal::height_to_normal,
 };
@@ -59,6 +59,7 @@ impl GroundGenerator {
 
 impl TextureGenerator for GroundGenerator {
     fn generate(&self, width: u32, height: u32) -> TextureMap {
+        validate_dimensions(width, height);
         let c = &self.config;
 
         let fbm_macro: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.macro_octaves);
@@ -69,7 +70,7 @@ impl TextureGenerator for GroundGenerator {
 
         let w = width as f64;
         let h = height as f64;
-        let n = (width * height) as usize;
+        let n = (width as usize) * (height as usize);
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -99,11 +100,11 @@ impl TextureGenerator for GroundGenerator {
                 albedo[ai + 3] = 255;
 
                 // Ground is generally rough; slight variation by moisture.
-                // glTF / Bevy StandardMaterial reads roughness from the Green channel.
+                // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
                 let rough = 0.80 + (1.0 - tf) * 0.15;
-                roughness[ai] = 0;
+                roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
                 roughness[ai + 1] = (rough * 255.0) as u8;
-                roughness[ai + 2] = 0;
+                roughness[ai + 2] = 0; // Metallic = 0.0
                 roughness[ai + 3] = 255;
             }
         }

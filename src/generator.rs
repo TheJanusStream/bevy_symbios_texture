@@ -28,6 +28,29 @@ pub trait TextureGenerator {
     fn generate(&self, width: u32, height: u32) -> TextureMap;
 }
 
+/// Maximum allowed texture dimension (per side).
+///
+/// Prevents allocation of unbounded memory and keeps sizes within GPU limits
+/// that are commonly supported across all major platforms.
+pub const MAX_DIMENSION: u32 = 8192;
+
+/// Panic-guard for texture dimensions.
+///
+/// Call at the top of every [`TextureGenerator::generate`] implementation.
+/// Catches both degenerate zero-sized textures (which produce invalid
+/// `wgpu` resources) and absurdly large ones (which would OOM or overflow).
+#[inline]
+pub fn validate_dimensions(width: u32, height: u32) {
+    assert!(
+        width > 0 && height > 0,
+        "texture dimensions must be non-zero (got {width}×{height})"
+    );
+    assert!(
+        width <= MAX_DIMENSION && height <= MAX_DIMENSION,
+        "texture dimensions exceed MAX_DIMENSION={MAX_DIMENSION} (got {width}×{height})"
+    );
+}
+
 /// Upload a [`TextureMap`] into [`Assets<Image>`] with repeat-wrapping samplers.
 ///
 /// Takes `map` by value to move the pixel buffers directly into the `Image`
