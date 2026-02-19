@@ -57,5 +57,5 @@ pub fn height_to_normal(heights: &[f64], width: u32, height: u32, strength: f32)
 
 #[inline]
 fn encode_normal(n: f64) -> u8 {
-    ((n * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8
+    ((n * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8
 }

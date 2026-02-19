@@ -24,14 +24,14 @@ use bevy::{
 
 use crate::{
     bark::{BarkConfig, BarkGenerator},
-    generator::{GeneratedHandles, TextureGenerator, TextureMap, map_to_images},
+    generator::{GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images},
     ground::{GroundConfig, GroundGenerator},
     rock::{RockConfig, RockGenerator},
 };
 
 /// Spawned onto an entity to request async texture generation.
 #[derive(Component)]
-pub struct PendingTexture(pub(crate) Task<TextureMap>);
+pub struct PendingTexture(pub(crate) Task<Result<TextureMap, TextureError>>);
 
 impl PendingTexture {
     pub fn bark(config: BarkConfig, width: u32, height: u32) -> Self {
@@ -67,12 +67,20 @@ pub fn poll_texture_tasks(
     mut images: ResMut<Assets<Image>>,
 ) {
     for (entity, mut pending) in &mut tasks {
-        if let Some(map) = block_on(future::poll_once(&mut pending.0)) {
-            let handles = map_to_images(map, &mut images);
-            commands
-                .entity(entity)
-                .remove::<PendingTexture>()
-                .insert(TextureReady(handles));
+        if let Some(result) = block_on(future::poll_once(&mut pending.0)) {
+            match result {
+                Ok(map) => {
+                    let handles = map_to_images(map, &mut images);
+                    commands
+                        .entity(entity)
+                        .remove::<PendingTexture>()
+                        .insert(TextureReady(handles));
+                }
+                Err(e) => {
+                    bevy::log::error!("Texture generation failed: {e}");
+                    commands.entity(entity).remove::<PendingTexture>();
+                }
+            }
         }
     }
 }

@@ -102,12 +102,6 @@ pub fn sample_grid<N: NoiseFn<f64, 4>>(
     out
 }
 
-/// Map a raw noise sample from `[-1, 1]` to an unsigned byte `[0, 255]`.
-#[inline]
-pub fn to_u8(v: f64) -> u8 {
-    ((v * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8
-}
-
 /// Map a raw noise sample from `[-1, 1]` to `[0, 1]`.
 #[inline]
 pub fn normalize(v: f64) -> f64 {

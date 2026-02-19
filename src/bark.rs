@@ -1,16 +1,21 @@
 //! Bark texture generator using domain-warped FBM noise.
 //!
 //! The algorithm:
-//!  1. Sample two FBM layers to produce warp offsets (du, dv).
-//!  2. Apply a strong vertical warp to create fibrous, vertical streaks.
-//!  3. Sample a third FBM layer at the warped coordinates for the final value.
+//!  1. Precompute toroidal sin/cos lookup tables (one entry per column, one per row).
+//!  2. For each pixel, sample two FBM warp layers inline to produce offsets (du, dv).
+//!  3. Sample a third FBM layer at the warped UV coordinates for the final value.
 //!  4. Derive colour, roughness and a height field from the result.
+//!
+//! Computing the warp layers inline (rather than storing full W×H grids) avoids
+//! two large intermediate allocations that would otherwise total ~1 GB at 8 K.
+
+use std::f64::consts::TAU;
 
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureGenerator, TextureMap, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
+    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
+    noise::ToroidalNoise,
     normal::height_to_normal,
 };
 
@@ -60,8 +65,8 @@ impl BarkGenerator {
 }
 
 impl TextureGenerator for BarkGenerator {
-    fn generate(&self, width: u32, height: u32) -> TextureMap {
-        validate_dimensions(width, height);
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Three independent FBM sources with offset seeds.
@@ -73,29 +78,50 @@ impl TextureGenerator for BarkGenerator {
         let warp_v_noise = ToroidalNoise::new(fbm_warp_v, c.scale);
         let base_noise = ToroidalNoise::new(fbm_base, c.scale);
 
-        let warp_u_field = sample_grid(&warp_u_noise, width, height);
-        let warp_v_field = sample_grid(&warp_v_noise, width, height);
+        let w = width as usize;
+        let h = height as usize;
+        let n = w * h;
 
-        let w = width as f64;
-        let h = height as f64;
-        let n = (width as usize) * (height as usize);
+        // Precompute toroidal coordinates (W + H entries instead of W × H).
+        // All three noise objects share the same `c.scale` frequency so one
+        // set of lookup tables covers all of them.
+        let freq = c.scale;
+        let col_cos: Vec<f64> = (0..w)
+            .map(|x| (TAU * x as f64 / w as f64).cos() * freq)
+            .collect();
+        let col_sin: Vec<f64> = (0..w)
+            .map(|x| (TAU * x as f64 / w as f64).sin() * freq)
+            .collect();
+        let row_cos: Vec<f64> = (0..h)
+            .map(|y| (TAU * y as f64 / h as f64).cos() * freq)
+            .collect();
+        let row_sin: Vec<f64> = (0..h)
+            .map(|y| (TAU * y as f64 / h as f64).sin() * freq)
+            .collect();
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
 
-        for y in 0..height {
-            for x in 0..width {
-                let idx = (y * width + x) as usize;
-                let u = x as f64 / w;
-                let v = y as f64 / h;
+        for y in 0..h {
+            let nz = row_cos[y];
+            let nw = row_sin[y];
+            let v = y as f64 / h as f64;
 
-                let du = warp_u_field[idx] * c.warp_u;
-                let dv = warp_v_field[idx] * c.warp_v;
+            for x in 0..w {
+                let nx = col_cos[x];
+                let ny = col_sin[x];
+                let u = x as f64 / w as f64;
 
+                // Compute warp offsets inline — no full-grid storage needed.
+                let du = warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
+                let dv = warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
+
+                // The warped UV can't use the precomputed tables, so call get().
                 let raw = base_noise.get(u + du, v + dv);
                 let t = normalize(raw); // [0, 1]
 
+                let idx = y * w + x;
                 heights[idx] = t;
 
                 // Colour: lerp between dark and light by height value.
@@ -112,23 +138,22 @@ impl TextureGenerator for BarkGenerator {
                 // Roughness: grooves (dark, low t) are rougher.
                 // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
                 let rough = 0.6 + (1.0 - t as f32) * 0.35;
-                let ri = idx * 4;
-                roughness[ri] = 255; // Occlusion = 1.0 (no shadowing)
-                roughness[ri + 1] = (rough * 255.0) as u8;
-                roughness[ri + 2] = 0; // Metallic = 0.0
-                roughness[ri + 3] = 255;
+                roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
+                roughness[ai + 1] = (rough * 255.0).round() as u8;
+                roughness[ai + 2] = 0; // Metallic = 0.0
+                roughness[ai + 3] = 255;
             }
         }
 
         let normal = height_to_normal(&heights, width, height, c.normal_strength);
 
-        TextureMap {
+        Ok(TextureMap {
             albedo,
             normal,
             roughness,
             width,
             height,
-        }
+        })
     }
 }
 
@@ -139,14 +164,8 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
 }
 
-/// Linear → sRGB using the standard piecewise IEC 61966-2-1 transfer function.
+/// Map a raw noise sample from `[-1, 1]` to `[0, 1]`.
 #[inline]
-fn linear_to_srgb(linear: f32) -> u8 {
-    let c = linear.clamp(0.0, 1.0);
-    let encoded = if c <= 0.0031308 {
-        c * 12.92
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    };
-    (encoded * 255.0) as u8
+fn normalize(v: f64) -> f64 {
+    v * 0.5 + 0.5
 }

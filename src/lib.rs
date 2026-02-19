@@ -16,7 +16,7 @@ pub mod noise;
 pub mod normal;
 pub mod rock;
 
-pub use generator::{GeneratedHandles, TextureGenerator, TextureMap, map_to_images};
+pub use generator::{GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images};
 pub use noise::ToroidalNoise;
 
 use bevy::prelude::*;

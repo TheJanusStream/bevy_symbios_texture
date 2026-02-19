@@ -6,7 +6,7 @@
 use noise::{MultiFractal, Perlin, RidgedMulti};
 
 use crate::{
-    generator::{TextureGenerator, TextureMap, validate_dimensions},
+    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
     noise::{ToroidalNoise, normalize, sample_grid},
     normal::height_to_normal,
 };
@@ -52,8 +52,8 @@ impl RockGenerator {
 }
 
 impl TextureGenerator for RockGenerator {
-    fn generate(&self, width: u32, height: u32) -> TextureMap {
-        validate_dimensions(width, height);
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
         let c = &self.config;
 
         let ridged: RidgedMulti<Perlin> = RidgedMulti::new(c.seed)
@@ -82,9 +82,10 @@ impl TextureGenerator for RockGenerator {
 
             // Ridges (high t) are slightly smoother (exposed mineral); cracks rougher.
             // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
-            let rough = 0.75 - t * 0.25;
+            // RidgedMulti output is not strictly bounded; clamp before casting.
+            let rough = (0.75 - t * 0.25).clamp(0.0, 1.0);
             roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
-            roughness[ai + 1] = (rough * 255.0) as u8;
+            roughness[ai + 1] = (rough * 255.0).round() as u8;
             roughness[ai + 2] = 0; // Metallic = 0.0
             roughness[ai + 3] = 255;
         }
@@ -93,29 +94,17 @@ impl TextureGenerator for RockGenerator {
         // Halving strength here is equivalent and avoids a full-sized allocation.
         let normal = height_to_normal(&heights, width, height, c.normal_strength * 0.5);
 
-        TextureMap {
+        Ok(TextureMap {
             albedo,
             normal,
             roughness,
             width,
             height,
-        }
+        })
     }
 }
 
 #[inline]
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t.clamp(0.0, 1.0)
-}
-
-/// Linear → sRGB using the standard piecewise IEC 61966-2-1 transfer function.
-#[inline]
-fn linear_to_srgb(linear: f32) -> u8 {
-    let c = linear.clamp(0.0, 1.0);
-    let encoded = if c <= 0.0031308 {
-        c * 12.92
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    };
-    (encoded * 255.0) as u8
 }
