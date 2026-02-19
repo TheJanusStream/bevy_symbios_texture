@@ -1,0 +1,9 @@
+/target
+**/*.rs.bk
+Cargo.lock
+/.claude
+/.chainlink
+CHANGELOG.md
+bevy_symbios_ground-primer.sh
+bevy_symbios_ground_primer_*
+.mcp.json
