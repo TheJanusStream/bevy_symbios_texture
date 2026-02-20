@@ -34,6 +34,7 @@ use crate::{
 pub struct PendingTexture(pub(crate) Task<Result<TextureMap, TextureError>>);
 
 impl PendingTexture {
+    /// Spawn an async bark texture generation task at `width × height` texels.
     pub fn bark(config: BarkConfig, width: u32, height: u32) -> Self {
         let generator = BarkGenerator::new(config);
         let task =
@@ -41,6 +42,7 @@ impl PendingTexture {
         Self(task)
     }
 
+    /// Spawn an async rock texture generation task at `width × height` texels.
     pub fn rock(config: RockConfig, width: u32, height: u32) -> Self {
         let generator = RockGenerator::new(config);
         let task =
@@ -48,6 +50,7 @@ impl PendingTexture {
         Self(task)
     }
 
+    /// Spawn an async ground texture generation task at `width × height` texels.
     pub fn ground(config: GroundConfig, width: u32, height: u32) -> Self {
         let generator = GroundGenerator::new(config);
         let task =

@@ -31,9 +31,9 @@ pub struct BarkConfig {
     pub warp_u: f64,
     /// Vertical warp strength (large — creates the fibrous streaks).
     pub warp_v: f64,
-    /// Base (light) bark colour in linear RGB [0,1].
+    /// Base (light) bark colour in linear RGB \[0, 1\].
     pub color_light: [f32; 3],
-    /// Dark groove colour in linear RGB [0,1].
+    /// Dark groove colour in linear RGB \[0, 1\].
     pub color_dark: [f32; 3],
     /// Normal map strength.
     pub normal_strength: f32,
@@ -54,11 +54,17 @@ impl Default for BarkConfig {
     }
 }
 
+/// Procedural bark texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`BarkConfig`].  Construct
+/// via [`BarkGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::bark`] task for non-blocking generation.
 pub struct BarkGenerator {
     config: BarkConfig,
 }
 
 impl BarkGenerator {
+    /// Create a new generator with the given configuration.
     pub fn new(config: BarkConfig) -> Self {
         Self { config }
     }

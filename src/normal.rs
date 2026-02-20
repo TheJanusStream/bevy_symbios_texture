@@ -8,7 +8,7 @@
 //!   A = 255
 //!
 //! The encoding follows Bevy's convention: values are remapped from [-1,1]
-//! to [0,255] via `((n + 1.0) * 0.5 * 255.0) as u8`.
+//! to \[0, 255\] via `((n + 1.0) * 0.5 * 255.0) as u8`.
 
 /// Convert a slice of normalised height values `[0, 1]` into a tangent-space
 /// normal map encoded as RGBA8.

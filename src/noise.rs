@@ -1,6 +1,6 @@
 //! Toroidal 4D noise mapping for seamless texture tiling.
 //!
-//! Maps 2D UV coordinates (in [0,1]) to a 4D point on a torus so that noise
+//! Maps 2D UV coordinates (in \[0, 1\]) to a 4D point on a torus so that noise
 //! sampled there wraps perfectly at all four edges with no seam.
 //!
 //! The mapping is:

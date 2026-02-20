@@ -17,13 +17,15 @@ pub struct RockConfig {
     pub seed: u32,
     /// Overall spatial scale.
     pub scale: f64,
+    /// Octaves for the ridged multifractal noise (more octaves → finer detail).
     pub octaves: usize,
     /// Attenuation of the ridged multifractal (controls sharpness of ridges).
     pub attenuation: f64,
-    /// Base (light) rock colour in linear RGB [0,1].
+    /// Base (light) rock colour in linear RGB \[0, 1\].
     pub color_light: [f32; 3],
-    /// Shadow (dark) colour in linear RGB [0,1].
+    /// Shadow (dark) colour in linear RGB \[0, 1\].
     pub color_dark: [f32; 3],
+    /// Normal map strength — larger values produce more pronounced surface detail.
     pub normal_strength: f32,
 }
 
@@ -41,11 +43,17 @@ impl Default for RockConfig {
     }
 }
 
+/// Procedural rock / stone texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`RockConfig`].  Construct
+/// via [`RockGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::rock`] task for non-blocking generation.
 pub struct RockGenerator {
     config: RockConfig,
 }
 
 impl RockGenerator {
+    /// Create a new generator with the given configuration.
     pub fn new(config: RockConfig) -> Self {
         Self { config }
     }

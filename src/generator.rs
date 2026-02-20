@@ -12,7 +12,9 @@ use bevy::{
 /// Error returned when texture dimensions are invalid.
 #[derive(Debug)]
 pub enum TextureError {
+    /// Either `width` or `height` was zero, which is not a valid wgpu texture size.
     ZeroDimension { width: u32, height: u32 },
+    /// One or both dimensions exceeded [`MAX_DIMENSION`].
     DimensionTooLarge { width: u32, height: u32, max: u32 },
 }
 
@@ -35,22 +37,38 @@ impl std::error::Error for TextureError {}
 
 /// Raw pixel buffers produced by a [`TextureGenerator`].
 pub struct TextureMap {
+    /// RGBA8 sRGB-encoded colour (albedo) pixels, row-major.
     pub albedo: Vec<u8>,
+    /// RGBA8 linear tangent-space normal map pixels, row-major.
     pub normal: Vec<u8>,
+    /// RGBA8 ORM (Occlusion/Roughness/Metallic) pixels, row-major.
     pub roughness: Vec<u8>,
+    /// Texture width in texels.
     pub width: u32,
+    /// Texture height in texels.
     pub height: u32,
 }
 
 /// Handles returned after uploading a [`TextureMap`] into Bevy's asset system.
 pub struct GeneratedHandles {
+    /// Handle to the albedo (colour) image.
     pub albedo: Handle<Image>,
+    /// Handle to the tangent-space normal map image.
     pub normal: Handle<Image>,
+    /// Handle to the ORM (Occlusion/Roughness/Metallic) image.
     pub roughness: Handle<Image>,
 }
 
-/// Implement this on any procedural texture configuration struct.
+/// Trait for procedural texture configuration structs.
+///
+/// Each struct that drives a specific texture type (bark, rock, ground, …)
+/// should provide an implementation that turns its configuration into a
+/// fully-populated [`TextureMap`].
 pub trait TextureGenerator {
+    /// Generate albedo, normal, and roughness pixel buffers at the given size.
+    ///
+    /// Returns [`TextureError`] if `width` or `height` is zero or exceeds
+    /// [`MAX_DIMENSION`].
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError>;
 }
 

@@ -7,7 +7,7 @@ description = "Algorithmic texture generator for Bevy."
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/TheJanusStream/bevy_symbios_texture"
-keywords = ["terrain", "procedural", "generative", "simulation"]
+keywords = ["texture", "procedural", "generative", "simulation"]
 categories = ["simulation", "game-development", "mathematics"]
 
 [dependencies]

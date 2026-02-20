@@ -18,16 +18,19 @@ pub struct GroundConfig {
     pub seed: u32,
     /// Scale of the large soil-patch layer.
     pub macro_scale: f64,
+    /// Octaves for the large soil-patch FBM layer.
     pub macro_octaves: usize,
     /// Scale of the fine-grain layer.
     pub micro_scale: f64,
+    /// Octaves for the fine-grain FBM layer.
     pub micro_octaves: usize,
     /// Blend weight of the micro layer (0 = only macro, 1 = only micro).
     pub micro_weight: f64,
-    /// Dry (light) soil colour in linear RGB [0,1].
+    /// Dry (light) soil colour in linear RGB \[0, 1\].
     pub color_dry: [f32; 3],
-    /// Moist (dark) soil colour in linear RGB [0,1].
+    /// Moist (dark) soil colour in linear RGB \[0, 1\].
     pub color_moist: [f32; 3],
+    /// Normal map strength — larger values produce more pronounced surface detail.
     pub normal_strength: f32,
 }
 
@@ -47,11 +50,17 @@ impl Default for GroundConfig {
     }
 }
 
+/// Procedural ground / dirt texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`GroundConfig`].  Construct
+/// via [`GroundGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::ground`] task for non-blocking generation.
 pub struct GroundGenerator {
     config: GroundConfig,
 }
 
 impl GroundGenerator {
+    /// Create a new generator with the given configuration.
     pub fn new(config: GroundConfig) -> Self {
         Self { config }
     }
