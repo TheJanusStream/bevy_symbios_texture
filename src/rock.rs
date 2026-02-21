@@ -36,7 +36,7 @@ impl Default for RockConfig {
             scale: 3.0,
             octaves: 8,
             attenuation: 2.0,
-            color_light: [0.55, 0.52, 0.48],
+            color_light: [0.37, 0.42, 0.36],
             color_dark: [0.22, 0.20, 0.18],
             normal_strength: 4.0,
         }
