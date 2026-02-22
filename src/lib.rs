@@ -12,12 +12,18 @@ pub mod async_gen;
 pub mod bark;
 pub mod generator;
 pub mod ground;
+pub mod leaf;
 pub mod noise;
 pub mod normal;
 pub mod rock;
+pub mod twig;
 
-pub use generator::{GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images};
+pub use generator::{
+    GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images, map_to_images_card,
+};
+pub use leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
 pub use noise::ToroidalNoise;
+pub use twig::{TwigConfig, TwigGenerator};
 
 use bevy::prelude::*;
 

@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."

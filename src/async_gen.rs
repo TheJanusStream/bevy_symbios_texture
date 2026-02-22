@@ -26,7 +26,9 @@ use crate::{
     bark::{BarkConfig, BarkGenerator},
     generator::{GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images},
     ground::{GroundConfig, GroundGenerator},
+    leaf::{LeafConfig, LeafGenerator},
     rock::{RockConfig, RockGenerator},
+    twig::{TwigConfig, TwigGenerator},
 };
 
 /// Spawned onto an entity to request async texture generation.
@@ -53,6 +55,28 @@ impl PendingTexture {
     /// Spawn an async ground texture generation task at `width × height` texels.
     pub fn ground(config: GroundConfig, width: u32, height: u32) -> Self {
         let generator = GroundGenerator::new(config);
+        let task =
+            AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
+        Self(task)
+    }
+
+    /// Spawn an async leaf texture generation task at `width × height` texels.
+    ///
+    /// Upload the result with [`map_to_images_card`](crate::generator::map_to_images_card)
+    /// to get a clamp-to-edge sampler suitable for foliage cards.
+    pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
+        let generator = LeafGenerator::new(config);
+        let task =
+            AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
+        Self(task)
+    }
+
+    /// Spawn an async twig texture generation task at `width × height` texels.
+    ///
+    /// Upload the result with [`map_to_images_card`](crate::generator::map_to_images_card)
+    /// to get a clamp-to-edge sampler suitable for foliage cards.
+    pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
+        let generator = TwigGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
         Self(task)

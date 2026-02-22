@@ -109,23 +109,63 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.width,
             map.height,
             TextureFormat::Rgba8UnormSrgb,
+            ImageAddressMode::Repeat,
         )),
         normal: images.add(make_image(
             map.normal,
             map.width,
             map.height,
             TextureFormat::Rgba8Unorm,
+            ImageAddressMode::Repeat,
         )),
         roughness: images.add(make_image(
             map.roughness,
             map.width,
             map.height,
             TextureFormat::Rgba8Unorm,
+            ImageAddressMode::Repeat,
         )),
     }
 }
 
-fn make_image(data: Vec<u8>, width: u32, height: u32, format: TextureFormat) -> Image {
+/// Upload a [`TextureMap`] into [`Assets<Image>`] with clamp-to-edge samplers.
+///
+/// Use this for foliage cards (leaf, twig) where the texture must not tile
+/// and the alpha silhouette must not bleed across edges.  For tileable
+/// surfaces use [`map_to_images`] instead.
+pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
+    GeneratedHandles {
+        albedo: images.add(make_image(
+            map.albedo,
+            map.width,
+            map.height,
+            TextureFormat::Rgba8UnormSrgb,
+            ImageAddressMode::ClampToEdge,
+        )),
+        normal: images.add(make_image(
+            map.normal,
+            map.width,
+            map.height,
+            TextureFormat::Rgba8Unorm,
+            ImageAddressMode::ClampToEdge,
+        )),
+        roughness: images.add(make_image(
+            map.roughness,
+            map.width,
+            map.height,
+            TextureFormat::Rgba8Unorm,
+            ImageAddressMode::ClampToEdge,
+        )),
+    }
+}
+
+fn make_image(
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    address_mode: ImageAddressMode,
+) -> Image {
     let mut image = Image::new(
         Extent3d {
             width,
@@ -138,8 +178,8 @@ fn make_image(data: Vec<u8>, width: u32, height: u32, format: TextureFormat) -> 
         RenderAssetUsages::default(),
     );
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_u: address_mode,
+        address_mode_v: address_mode,
         ..Default::default()
     });
     image
