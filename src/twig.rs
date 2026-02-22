@@ -53,9 +53,6 @@ const STEM_TAPER_POW: f64 = 0.55;
 /// Scale of the terminal leaf relative to lateral leaves.
 const TERMINAL_SCALE: f64 = 0.72;
 
-/// V position (from tip) where the terminal leaf is attached.
-const TERMINAL_V: f64 = 0.07;
-
 // ----------------------------------------------------------------------------
 
 /// Configures the appearance of a [`TwigGenerator`].
@@ -152,9 +149,17 @@ impl TwigGenerator {
         // 2 leaves per node + 1 terminal.
         let mut atts = Vec::with_capacity(n * 2 + 1);
 
+        // The terminal leaf card extends toward the tip (v=0) by `leaf_scale *
+        // TERMINAL_SCALE` texture units.  Push its attachment point far enough
+        // from the edge that the whole card stays inside the texture.
+        let term_v = terminal_v(c);
+
+        // Lateral leaves run from just below the terminal to near the base.
+        let lat_start = term_v + 0.05;
+        let lat_span = 0.88 - lat_start;
+
         for i in 0..n {
-            // Distribute nodes from just below apex to just above base.
-            let attach_v = 0.12 + (i as f64 / n as f64) * 0.75;
+            let attach_v = lat_start + (i as f64 / n as f64) * lat_span;
             let attach_u = stem_center_u(attach_v, c, perlin);
             let tangent = stem_tangent_at(attach_v, c, perlin);
 
@@ -173,10 +178,10 @@ impl TwigGenerator {
         }
 
         // Terminal leaf: points back along the stem (upward = +PI from downward).
-        let term_tangent = stem_tangent_at(TERMINAL_V, c, perlin);
+        let term_tangent = stem_tangent_at(term_v, c, perlin);
         atts.push(LeafAttachment {
-            attach_u: stem_center_u(TERMINAL_V, c, perlin),
-            attach_v: TERMINAL_V,
+            attach_u: stem_center_u(term_v, c, perlin),
+            attach_v: term_v,
             angle: term_tangent + PI, // pointing toward tip (upward)
             scale: c.leaf_scale * TERMINAL_SCALE,
         });
@@ -197,14 +202,16 @@ impl TwigGenerator {
         // 1 leaf per node + 1 terminal.
         let mut atts = Vec::with_capacity(n + 1);
 
+        let term_v = terminal_v(c);
+        let lat_start = term_v + 0.05;
+        let lat_span = 0.88 - lat_start;
+
         for i in 0..n {
             // Position leaves at the extrema of the sine zigzag.
             // sin(pv * n * PI) has extrema at pv = (2k+1) / (2n).
-            // We map k=0..n-1 from just below apex to just above base.
             let k = i as f64;
-            let attach_v = (2.0 * k + 1.0) / (2.0 * n as f64);
-            // Clamp to the visible range.
-            let attach_v = 0.10 + attach_v * 0.80;
+            let normalized = (2.0 * k + 1.0) / (2.0 * n as f64);
+            let attach_v = lat_start + normalized * lat_span;
 
             let attach_u = stem_center_u(attach_v, c, perlin);
             let tangent = stem_tangent_at(attach_v, c, perlin);
@@ -222,10 +229,10 @@ impl TwigGenerator {
         }
 
         // Terminal leaf.
-        let term_tangent = stem_tangent_at(TERMINAL_V, c, perlin);
+        let term_tangent = stem_tangent_at(term_v, c, perlin);
         atts.push(LeafAttachment {
-            attach_u: stem_center_u(TERMINAL_V, c, perlin),
-            attach_v: TERMINAL_V,
+            attach_u: stem_center_u(term_v, c, perlin),
+            attach_v: term_v,
             angle: term_tangent + PI,
             scale: c.leaf_scale * TERMINAL_SCALE,
         });
@@ -331,6 +338,16 @@ impl TextureGenerator for TwigGenerator {
 }
 
 // --- stem helpers -----------------------------------------------------------
+
+/// V attachment position for the terminal leaf.
+///
+/// The terminal leaf card extends `leaf_scale * TERMINAL_SCALE` units toward
+/// the tip (`v = 0`).  Placing the attachment at this V ensures the whole card
+/// remains inside the `[0, 1]` texture with a small margin.
+#[inline]
+fn terminal_v(config: &TwigConfig) -> f64 {
+    config.leaf_scale * TERMINAL_SCALE + 0.03
+}
 
 /// U coordinate of the stem centreline at a given V (tip-to-base axis).
 ///

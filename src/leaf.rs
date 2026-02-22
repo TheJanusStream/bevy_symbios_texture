@@ -55,7 +55,7 @@ pub struct LeafConfig {
     /// Colour at the leaf edges (e.g., autumn tinge, drying) in linear RGB \[0, 1\].
     pub color_edge: [f32; 3],
     /// UV perturbation magnitude before the envelope check.  Controls how
-    /// jagged the silhouette edges appear.
+    /// jagged the silhouette edges appear via Perlin noise.
     pub serration_strength: f64,
     /// Angle factor for secondary veins.  Controls the ratio of U-frequency
     /// to V-frequency of the chevron pattern — higher → more acute vein angle.
@@ -64,6 +64,16 @@ pub struct LeafConfig {
     pub micro_detail: f64,
     /// Normal map strength.
     pub normal_strength: f32,
+    /// Number of periodic lobe half-cycles along the leaf length.
+    /// `0.0` = no lobes (smooth envelope); `4.0` = four bumps per side.
+    pub lobe_count: f64,
+    /// Lobe modulation depth as a fraction of the base envelope width.
+    /// `0.0` = no effect; `1.0` = lobes can fully indent to zero.
+    pub lobe_depth: f64,
+    /// Controls the shape of each lobe peak.
+    /// `1.0` = smooth cosine; `>1.0` = narrower / pointier peaks;
+    /// `<1.0` = wide flat peaks with sharp transitions.
+    pub lobe_sharpness: f64,
 }
 
 impl Default for LeafConfig {
@@ -76,6 +86,9 @@ impl Default for LeafConfig {
             vein_angle: 2.5,
             micro_detail: 0.3,
             normal_strength: 2.0,
+            lobe_count: 0.0,
+            lobe_depth: 0.35,
+            lobe_sharpness: 1.0,
         }
     }
 }
@@ -124,26 +137,34 @@ impl LeafSampler {
     pub fn sample(&self, u: f64, v: f64) -> Option<LeafSample> {
         let c = &self.config;
 
-        // --- Envelope check (with serration perturbation) ---
+        // --- Envelope check (with lobe modulation + serration perturbation) ---
         let envelope = leaf_envelope(v);
         if envelope <= 0.0 {
             return None;
         }
 
+        // Periodic lobe modulation: a cosine wave along V scales the envelope
+        // boundary, producing regular bumps (lobes) or indentations.
+        // lobe_sharpness > 1 → narrower / pointier peaks.
+        let effective_envelope = lobe_envelope(envelope, v, c);
+        if effective_envelope <= 0.0 {
+            return None;
+        }
+
         // Perturb the distance-from-midrib with Perlin noise to create organic
-        // serrated edges.
+        // serrated edges on top of the periodic lobe pattern.
         let serration =
             self.perlin.get([u * SERRATION_FREQ, v * SERRATION_FREQ]) * c.serration_strength;
         let dist_from_midrib = (u - 0.5).abs() + serration;
 
-        if dist_from_midrib >= envelope {
+        if dist_from_midrib >= effective_envelope {
             return None;
         }
 
         // --- Venation height field ---
 
-        // Primary vein (midrib): maximum at u=0.5, falls off linearly to the
-        // envelope edge.
+        // Primary vein (midrib): falls off from u=0.5 to the base envelope edge
+        // so the ridge follows the underlying leaf shape, not the lobed outline.
         let primary = (1.0 - dist_from_midrib / envelope).clamp(0.0, 1.0);
 
         // Secondary veins: chevron pattern branching symmetrically from the
@@ -167,7 +188,7 @@ impl LeafSampler {
         // --- Colour ---
         // Blend from base colour toward the edge colour as we approach the
         // silhouette boundary, simulating drying at leaf margins.
-        let edge_t = (dist_from_midrib / envelope).clamp(0.0, 1.0) as f32;
+        let edge_t = (dist_from_midrib / effective_envelope).clamp(0.0, 1.0) as f32;
         let color = [
             lerp(c.color_base[0], c.color_edge[0], edge_t),
             lerp(c.color_base[1], c.color_edge[1], edge_t),
@@ -270,6 +291,24 @@ impl TextureGenerator for LeafGenerator {
 }
 
 // --- private helpers --------------------------------------------------------
+
+/// Apply periodic lobe modulation to the base envelope half-width.
+///
+/// Multiplies the base envelope by `1 + shaped * lobe_depth` where `shaped`
+/// is a sharpness-adjusted cosine of `v * lobe_count * π`.  Returns a value
+/// ≥ 0; negative results are clamped to 0 (full indentation).
+///
+/// When `lobe_count == 0` or `lobe_depth == 0`, returns `base` unchanged.
+#[inline]
+fn lobe_envelope(base: f64, v: f64, config: &LeafConfig) -> f64 {
+    if config.lobe_count <= 0.0 || config.lobe_depth <= 0.0 {
+        return base;
+    }
+    let cos_val = (v * config.lobe_count * PI).cos();
+    // sign-preserving power: keeps valleys negative so they indent the envelope.
+    let shaped = cos_val.signum() * cos_val.abs().powf(config.lobe_sharpness.max(0.1));
+    (base * (1.0 + shaped * config.lobe_depth)).max(0.0)
+}
 
 /// Half-width of the leaf envelope at normalised V position.
 ///

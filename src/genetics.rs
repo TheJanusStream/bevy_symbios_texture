@@ -272,6 +272,9 @@ impl Genotype for LeafConfig {
         self.vein_angle = mutate_f64(self.vein_angle, rng, rate, 0.3, 0.5, 6.0);
         self.micro_detail = mutate_f64(self.micro_detail, rng, rate, 0.1, 0.0, 1.0);
         self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.3, 0.5, 6.0);
+        self.lobe_count = mutate_f64(self.lobe_count, rng, rate, 1.0, 0.0, 10.0);
+        self.lobe_depth = mutate_f64(self.lobe_depth, rng, rate, 0.15, 0.0, 1.0);
+        self.lobe_sharpness = mutate_f64(self.lobe_sharpness, rng, rate, 0.4, 0.1, 5.0);
     }
 
     fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
@@ -302,6 +305,21 @@ impl Genotype for LeafConfig {
                 self.normal_strength
             } else {
                 other.normal_strength
+            },
+            lobe_count: if rng.random::<bool>() {
+                self.lobe_count
+            } else {
+                other.lobe_count
+            },
+            lobe_depth: if rng.random::<bool>() {
+                self.lobe_depth
+            } else {
+                other.lobe_depth
+            },
+            lobe_sharpness: if rng.random::<bool>() {
+                self.lobe_sharpness
+            } else {
+                other.lobe_sharpness
             },
         }
     }
