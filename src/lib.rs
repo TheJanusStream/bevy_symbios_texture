@@ -11,6 +11,7 @@
 pub mod async_gen;
 pub mod bark;
 pub mod generator;
+pub mod genetics;
 pub mod ground;
 pub mod leaf;
 pub mod noise;

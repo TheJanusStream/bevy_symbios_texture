@@ -13,7 +13,7 @@ use crate::{
 };
 
 /// Configures the appearance of a [`GroundGenerator`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GroundConfig {
     pub seed: u32,
     /// Scale of the large soil-patch layer.

@@ -47,7 +47,7 @@ const VEIN_FREQ_V: f64 = 12.0;
 // ----------------------------------------------------------------------------
 
 /// Configures the appearance of a [`LeafGenerator`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LeafConfig {
     pub seed: u32,
     /// Overall colour of the leaf interior in linear RGB \[0, 1\].

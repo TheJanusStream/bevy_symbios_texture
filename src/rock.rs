@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// Configures the appearance of a [`RockGenerator`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RockConfig {
     pub seed: u32,
     /// Overall spatial scale.

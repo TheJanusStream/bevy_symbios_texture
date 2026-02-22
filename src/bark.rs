@@ -20,7 +20,7 @@ use crate::{
 };
 
 /// Configures the appearance of a [`BarkGenerator`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BarkConfig {
     pub seed: u32,
     /// Overall spatial scale of the bark pattern.

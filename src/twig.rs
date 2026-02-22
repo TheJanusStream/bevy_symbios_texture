@@ -59,7 +59,7 @@ const TERMINAL_V: f64 = 0.07;
 // ----------------------------------------------------------------------------
 
 /// Configures the appearance of a [`TwigGenerator`].
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TwigConfig {
     /// Leaf appearance shared by every leaf on the twig.
     pub leaf: LeafConfig,

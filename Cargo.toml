@@ -13,6 +13,9 @@ categories = ["simulation", "game-development", "mathematics"]
 [dependencies]
 bevy = "0.18"
 noise = "0.9"
+rand = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+symbios-genetics = { path = "../symbios-genetics" }
 
 [dev-dependencies]
 serde_json = "1.0"
