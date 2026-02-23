@@ -14,7 +14,7 @@
 //! two parents at random (50/50).  Color channels are crossed over per-channel
 //! for finer-grained colour mixing.
 
-use std::f64::consts::FRAC_PI_2;
+use std::f64::consts::PI;
 
 use rand::Rng;
 use symbios_genetics::Genotype;
@@ -363,7 +363,7 @@ impl Genotype for TwigConfig {
         self.stem_color = mutate_color3(self.stem_color, rng, rate, 0.07);
         self.stem_half_width = mutate_f64(self.stem_half_width, rng, rate, 0.005, 0.005, 0.05);
         self.leaf_pairs = mutate_usize(self.leaf_pairs, rng, rate, 1, 8);
-        self.leaf_angle = mutate_f64(self.leaf_angle, rng, rate, 0.15, 0.1, FRAC_PI_2);
+        self.leaf_angle = mutate_f64(self.leaf_angle, rng, rate, 0.15, 0.1, PI);
         self.leaf_scale = mutate_f64(self.leaf_scale, rng, rate, 0.05, 0.15, 0.6);
         self.stem_curve = mutate_f64(self.stem_curve, rng, rate, 0.02, 0.0, 0.2);
         if rng.random::<f32>() < rate {

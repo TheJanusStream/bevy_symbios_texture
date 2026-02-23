@@ -69,8 +69,12 @@ pub struct TwigConfig {
     /// Monopodial: `leaf_pairs` opposite pairs.  Sympodial: `leaf_pairs`
     /// alternate leaves.
     pub leaf_pairs: usize,
-    /// Angle of each lateral leaf measured from the stem's **local tangent**
-    /// (radians).  `π/2` = perpendicular, smaller = more forward-facing.
+    /// Angle of each lateral leaf measured from the stem axis, in radians.
+    ///
+    /// * `0` — leaf points along the stem toward the base.
+    /// * `π/2` — leaf is perpendicular to the stem (horizontal on a vertical twig).
+    /// * `> π/2` — leaf tip angles toward the stem tip (acroscopic / upswept).
+    /// * `π` — leaf points straight toward the apex.
     pub leaf_angle: f64,
     /// Scale of each lateral leaf card in UV space.
     pub leaf_scale: f64,
@@ -89,7 +93,7 @@ impl Default for TwigConfig {
             stem_color: [0.25, 0.16, 0.07],
             stem_half_width: 0.015,
             leaf_pairs: 4,
-            leaf_angle: FRAC_PI_2 - 0.35, // ≈ 69° — mostly sideways, slight forward angle
+            leaf_angle: FRAC_PI_2 - 0.35, // ≈ 69° — slightly below perpendicular, drooping
             leaf_scale: 0.38,
             stem_curve: 0.05,
             sympodial: false,
