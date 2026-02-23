@@ -275,6 +275,11 @@ impl Genotype for LeafConfig {
         self.lobe_count = mutate_f64(self.lobe_count, rng, rate, 1.0, 0.0, 10.0);
         self.lobe_depth = mutate_f64(self.lobe_depth, rng, rate, 0.15, 0.0, 1.0);
         self.lobe_sharpness = mutate_f64(self.lobe_sharpness, rng, rate, 0.4, 0.1, 5.0);
+        self.petiole_length = mutate_f64(self.petiole_length, rng, rate, 0.02, 0.0, 0.25);
+        self.petiole_width = mutate_f64(self.petiole_width, rng, rate, 0.003, 0.008, 0.05);
+        self.midrib_width = mutate_f64(self.midrib_width, rng, rate, 0.02, 0.03, 0.35);
+        self.vein_count = mutate_f64(self.vein_count, rng, rate, 1.0, 2.0, 14.0);
+        self.venule_strength = mutate_f64(self.venule_strength, rng, rate, 0.1, 0.0, 1.0);
     }
 
     fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
@@ -320,6 +325,31 @@ impl Genotype for LeafConfig {
                 self.lobe_sharpness
             } else {
                 other.lobe_sharpness
+            },
+            petiole_length: if rng.random::<bool>() {
+                self.petiole_length
+            } else {
+                other.petiole_length
+            },
+            petiole_width: if rng.random::<bool>() {
+                self.petiole_width
+            } else {
+                other.petiole_width
+            },
+            midrib_width: if rng.random::<bool>() {
+                self.midrib_width
+            } else {
+                other.midrib_width
+            },
+            vein_count: if rng.random::<bool>() {
+                self.vein_count
+            } else {
+                other.vein_count
+            },
+            venule_strength: if rng.random::<bool>() {
+                self.venule_strength
+            } else {
+                other.venule_strength
             },
         }
     }

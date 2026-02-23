@@ -29,7 +29,7 @@ use crate::{
 // --- tuning constants -------------------------------------------------------
 
 /// Serration noise frequency (UV cycles).  Higher → finer-toothed edge.
-const SERRATION_FREQ: f64 = 18.0;
+const SERRATION_FREQ: f64 = 14.0;
 
 /// Envelope decay rate.  Controls how quickly the leaf narrows from base to
 /// tip.  Higher → narrower / more pointed leaf.
@@ -41,8 +41,8 @@ const MAX_HALF_WIDTH: f64 = 0.44;
 /// Frequency of the Worley capillary cells (cells per UV unit).
 const WORLEY_FREQ: f64 = 20.0;
 
-/// Frequency of secondary vein oscillation along V.
-const VEIN_FREQ_V: f64 = 12.0;
+/// Frequency of the venule (tertiary vein) Perlin noise (UV cycles).
+const VENULE_FREQ: f64 = 28.0;
 
 // ----------------------------------------------------------------------------
 
@@ -54,11 +54,13 @@ pub struct LeafConfig {
     pub color_base: [f32; 3],
     /// Colour at the leaf edges (e.g., autumn tinge, drying) in linear RGB \[0, 1\].
     pub color_edge: [f32; 3],
-    /// UV perturbation magnitude before the envelope check.  Controls how
-    /// jagged the silhouette edges appear via Perlin noise.
+    /// Tooth depth as a fraction of the local envelope half-width `[0, 1]`.
+    /// Serration is scaled by the envelope so teeth stay proportional at the
+    /// narrow tip — preventing the splotchy artefacts caused by a fixed offset
+    /// exceeding the envelope width.  `0.12` ≈ fine serration; `0.35` ≈ coarse.
     pub serration_strength: f64,
-    /// Angle factor for secondary veins.  Controls the ratio of U-frequency
-    /// to V-frequency of the chevron pattern — higher → more acute vein angle.
+    /// Angle factor for secondary veins.  Controls the ratio of lateral
+    /// frequency to longitudinal frequency — higher → more acute vein angle.
     pub vein_angle: f64,
     /// Blend weight of the Worley capillary micro-detail layer \[0, 1\].
     pub micro_detail: f64,
@@ -74,6 +76,19 @@ pub struct LeafConfig {
     /// `1.0` = smooth cosine; `>1.0` = narrower / pointier peaks;
     /// `<1.0` = wide flat peaks with sharp transitions.
     pub lobe_sharpness: f64,
+    /// Fraction of the V axis reserved for the petiole (leaf stalk).
+    /// `0.0` = no petiole; `0.12` = bottom 12 % of texture is stalk.
+    pub petiole_length: f64,
+    /// Half-width of the petiole as a fraction of UV width.
+    pub petiole_width: f64,
+    /// Width of the midrib ridge as a fraction of the base envelope half-width.
+    /// `0.05` = crisp narrow ridge; `0.20` = broad pronounced ridge.
+    pub midrib_width: f64,
+    /// Number of secondary vein pairs branching from the midrib.
+    /// Each pair spans one full sine cycle — `6` gives six chevron pairs.
+    pub vein_count: f64,
+    /// Blend weight of the venule (tertiary vein) network layer \[0, 1\].
+    pub venule_strength: f64,
 }
 
 impl Default for LeafConfig {
@@ -82,13 +97,18 @@ impl Default for LeafConfig {
             seed: 0,
             color_base: [0.12, 0.35, 0.08],
             color_edge: [0.35, 0.28, 0.05],
-            serration_strength: 0.025,
+            serration_strength: 0.12,
             vein_angle: 2.5,
             micro_detail: 0.3,
-            normal_strength: 2.0,
+            normal_strength: 3.0,
             lobe_count: 0.0,
             lobe_depth: 0.35,
             lobe_sharpness: 1.0,
+            petiole_length: 0.12,
+            petiole_width: 0.022,
+            midrib_width: 0.12,
+            vein_count: 6.0,
+            venule_strength: 0.50,
         }
     }
 }
@@ -112,6 +132,8 @@ pub struct LeafSampler {
     config: LeafConfig,
     /// High-frequency Perlin noise used for edge serration.
     perlin: Perlin,
+    /// Independent Perlin noise for the venule (tertiary vein) network.
+    perlin_venule: Perlin,
     /// Worley (cellular) noise for capillary micro-venation.
     worley: Worley,
 }
@@ -120,6 +142,7 @@ impl LeafSampler {
     /// Construct a sampler for the given configuration.
     pub fn new(config: LeafConfig) -> Self {
         let perlin = Perlin::new(config.seed);
+        let perlin_venule = Perlin::new(config.seed.wrapping_add(2));
         // Use distance-to-feature-point mode: cell boundaries → high values.
         let worley = Worley::new(config.seed.wrapping_add(1))
             .set_return_type(ReturnType::Distance)
@@ -127,6 +150,7 @@ impl LeafSampler {
         Self {
             config,
             perlin,
+            perlin_venule,
             worley,
         }
     }
@@ -137,8 +161,45 @@ impl LeafSampler {
     pub fn sample(&self, u: f64, v: f64) -> Option<LeafSample> {
         let c = &self.config;
 
-        // --- Envelope check (with lobe modulation + serration perturbation) ---
-        let envelope = leaf_envelope(v);
+        // --- Petiole region (v < petiole_length) ---
+        // The petiole is the narrow stalk connecting the leaf to the stem.
+        // It occupies the bottom fraction of the texture in blade UV space.
+        if c.petiole_length > 0.0 && v < c.petiole_length {
+            let dist = (u - 0.5).abs();
+            // Taper slightly at the very bottom, widening toward the blade base.
+            let half_width = c.petiole_width * (0.7 + 0.3 * v / c.petiole_length);
+            if dist >= half_width {
+                return None;
+            }
+            // Semicircular cross-section profile — raised ridge down the centre.
+            let t = dist / half_width;
+            let height = (1.0 - t * t).sqrt();
+            return Some(LeafSample {
+                height,
+                color: c.color_base,
+                roughness: 0.58,
+            });
+        }
+
+        // Remap V into blade space [0, 1] so that the petiole region does not
+        // compress the leaf blade geometry.
+        let v_blade = if c.petiole_length > 0.0 {
+            (v - c.petiole_length) / (1.0 - c.petiole_length)
+        } else {
+            v
+        };
+
+        // --- Envelope ---
+        // The base envelope is extended at v_blade=0 by the petiole half-width,
+        // decaying exponentially so the blade seamlessly continues from the stalk
+        // without pinching to zero at the join.
+        let envelope_blade = leaf_envelope(v_blade);
+        let petiole_base = if c.petiole_length > 0.0 {
+            c.petiole_width * (-v_blade * 12.0).exp()
+        } else {
+            0.0
+        };
+        let envelope = envelope_blade + petiole_base;
         if envelope <= 0.0 {
             return None;
         }
@@ -146,59 +207,91 @@ impl LeafSampler {
         // Periodic lobe modulation: a cosine wave along V scales the envelope
         // boundary, producing regular bumps (lobes) or indentations.
         // lobe_sharpness > 1 → narrower / pointier peaks.
-        let effective_envelope = lobe_envelope(envelope, v, c);
+        let effective_envelope = lobe_envelope(envelope, v_blade, c);
         if effective_envelope <= 0.0 {
             return None;
         }
 
-        // Perturb the distance-from-midrib with Perlin noise to create organic
-        // serrated edges on top of the periodic lobe pattern.
-        let serration =
-            self.perlin.get([u * SERRATION_FREQ, v * SERRATION_FREQ]) * c.serration_strength;
-        let dist_from_midrib = (u - 0.5).abs() + serration;
-
-        if dist_from_midrib >= effective_envelope {
+        // --- Silhouette test with proportional serration ---
+        // Serration is scaled by the local envelope so tooth depth stays
+        // proportional everywhere — preventing noise larger than the envelope
+        // from punching isolated holes near the narrow leaf tip.
+        let raw_dist = (u - 0.5).abs();
+        let serration = self.perlin.get([u * SERRATION_FREQ, v_blade * SERRATION_FREQ])
+            * c.serration_strength
+            * effective_envelope;
+        if raw_dist + serration >= effective_envelope {
             return None;
         }
 
+        // From here all height/colour calculations use `raw_dist` (unperturbed)
+        // so that the venation field is smooth regardless of edge serration.
+
         // --- Venation height field ---
 
-        // Primary vein (midrib): falls off from u=0.5 to the base envelope edge
-        // so the ridge follows the underlying leaf shape, not the lobed outline.
-        let primary = (1.0 - dist_from_midrib / envelope).clamp(0.0, 1.0);
+        // Blade dome: gentle cross-sectional curvature, highest at the midrib.
+        let edge_frac = (raw_dist / effective_envelope).clamp(0.0, 1.0);
+        let dome = 1.0 - edge_frac * edge_frac;
 
-        // Secondary veins: chevron pattern branching symmetrically from the
-        // midrib.  `vein_angle` scales the lateral frequency relative to V,
-        // controlling how acute the vein branches appear.
-        let secondary = (v * VEIN_FREQ_V - (u - 0.5).abs() * VEIN_FREQ_V * c.vein_angle)
+        // Midrib: a narrow prominent ridge at u = 0.5.  Uses the un-lobed
+        // `envelope` so ridge width stays consistent through lobed leaf shapes.
+        let midrib_norm = (raw_dist / (envelope * c.midrib_width.max(0.01))).min(1.0);
+        let midrib = (1.0 - midrib_norm).powi(2);
+
+        // Secondary veins: symmetric chevron ridges branching from the midrib.
+        // powf(4) narrows the broad sine wave into distinct vein lines.
+        let vein_freq = c.vein_count * 2.0;
+        let secondary = (v_blade * vein_freq - raw_dist * vein_freq * c.vein_angle)
             .sin()
-            .abs();
+            .abs()
+            .powf(4.0);
 
-        // Tertiary veins (capillary network): Worley distance-to-edge gives
-        // bright ridges at Voronoi cell boundaries, mimicking the leaf's
-        // spongy mesophyll network.
-        // Worley returns `distance * 2.0 - 1.0`; normalise back to [0, 1].
-        let micro = (self.worley.get([u, v]) * 0.5 + 0.5).clamp(0.0, 1.0);
+        // Venules: fine reticulate network between the secondary veins.
+        // Two oblique sine sets, jittered by a low-frequency Perlin field,
+        // create an organic diamond mesh.  powf(6) ensures crisp narrow ridges.
+        let jitter = self.perlin_venule.get([u * 4.0, v_blade * 4.0]) * 1.8;
+        let vn1 = ((u - 0.5) * VENULE_FREQ + v_blade * VENULE_FREQ * 0.38 + jitter)
+            .sin()
+            .abs()
+            .powf(6.0);
+        let vn2 = ((u - 0.5) * VENULE_FREQ - v_blade * VENULE_FREQ * 0.38 + jitter)
+            .sin()
+            .abs()
+            .powf(6.0);
+        let venule = vn1.max(vn2);
 
-        // Combine layers: primary dominates (0.5), secondary adds structure
-        // (0.2), micro_detail scales the capillary contribution (up to 0.3).
-        let height =
-            (primary * 0.5 + secondary * 0.2 + micro * c.micro_detail * 0.3).clamp(0.0, 1.0);
+        // Micro (Worley capillary network): bright ridges at Voronoi cell
+        // boundaries mimic the spongy mesophyll between the finest veinlets.
+        // Worley returns distance * 2 - 1; normalise to [0, 1].
+        let micro = (self.worley.get([u, v_blade]) * 0.5 + 0.5).clamp(0.0, 1.0);
+
+        // Combine layers.
+        let height = (dome * 0.15
+            + midrib * 0.40
+            + secondary * 0.25
+            + venule * c.venule_strength * 0.15
+            + micro * c.micro_detail * 0.05)
+            .clamp(0.0, 1.0);
 
         // --- Colour ---
-        // Blend from base colour toward the edge colour as we approach the
-        // silhouette boundary, simulating drying at leaf margins.
-        let edge_t = (dist_from_midrib / effective_envelope).clamp(0.0, 1.0) as f32;
+        // Base: blend from interior colour toward the edge colour.
+        // Veins are lightened in albedo — they contain less chlorophyll and
+        // reflect more, making them visible even before lighting is applied.
+        let edge_t = edge_frac as f32;
+        let blade_r = lerp(c.color_base[0], c.color_edge[0], edge_t);
+        let blade_g = lerp(c.color_base[1], c.color_edge[1], edge_t);
+        let blade_b = lerp(c.color_base[2], c.color_edge[2], edge_t);
+        let vein_brightness =
+            (midrib as f32 * 0.6 + secondary as f32 * 0.4).clamp(0.0, 1.0) * 0.18;
         let color = [
-            lerp(c.color_base[0], c.color_edge[0], edge_t),
-            lerp(c.color_base[1], c.color_edge[1], edge_t),
-            lerp(c.color_base[2], c.color_edge[2], edge_t),
+            (blade_r + vein_brightness).min(1.0),
+            (blade_g + vein_brightness * 0.75).min(1.0),
+            (blade_b + vein_brightness * 0.25).min(1.0),
         ];
 
         // --- Roughness ---
-        // Vein ridges (high height) are slightly smoother; mesophyll cells
-        // (lower) are rougher.
-        let roughness = lerp(0.80, 0.55, height as f32);
+        // Vein ridges are slightly smoother than the surrounding mesophyll.
+        let roughness = lerp(0.80, 0.52, height as f32);
 
         Some(LeafSample {
             height,
