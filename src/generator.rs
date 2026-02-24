@@ -74,9 +74,10 @@ pub trait TextureGenerator {
 
 /// Maximum allowed texture dimension (per side).
 ///
-/// Prevents allocation of unbounded memory and keeps sizes within GPU limits
-/// that are commonly supported across all major platforms.
-pub const MAX_DIMENSION: u32 = 8192;
+/// Capped at 4096 to bound peak memory usage.  At 8192 the bark generator
+/// alone requires ~1.75 GB per task; with four concurrent tasks that exceeds
+/// 7 GB and OOMs mid-range machines.  At 4096 the peak is ~450 MB per task.
+pub const MAX_DIMENSION: u32 = 4096;
 
 /// Dimension guard for texture generators.
 ///
@@ -110,6 +111,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.height,
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::Repeat,
+            MipmapMode::Srgb,
         )),
         normal: images.add(make_image(
             map.normal,
@@ -117,6 +119,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.height,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
+            MipmapMode::Normal,
         )),
         roughness: images.add(make_image(
             map.roughness,
@@ -124,6 +127,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.height,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
+            MipmapMode::Linear,
         )),
     }
 }
@@ -141,6 +145,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.height,
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::ClampToEdge,
+            MipmapMode::Srgb,
         )),
         normal: images.add(make_image(
             map.normal,
@@ -148,6 +153,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.height,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
+            MipmapMode::Normal,
         )),
         roughness: images.add(make_image(
             map.roughness,
@@ -155,19 +161,118 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.height,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
+            MipmapMode::Linear,
         )),
+    }
+}
+
+/// Controls how mipmap averages are computed for different texture types.
+#[derive(Clone, Copy)]
+enum MipmapMode {
+    /// Albedo: decode from sRGB, average in linear light, re-encode to sRGB.
+    /// Averaging in non-linear space makes mipmaps artificially dark.
+    Srgb,
+    /// Normal map: decode XYZ to [-1, 1], average, renormalize, re-encode.
+    /// Averaging without renormalization shrinks or zeroes the normal length.
+    Normal,
+    /// ORM / linear maps: average directly in u8 space (already linear).
+    Linear,
+}
+
+/// Decode an sRGB u8 value to linear-light f32.
+fn srgb_to_linear(v: u8) -> f32 {
+    static LUT: OnceLock<[f32; 256]> = OnceLock::new();
+    LUT.get_or_init(|| {
+        std::array::from_fn(|i| {
+            let c = i as f32 / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        })
+    })[v as usize]
+}
+
+/// Average a 2×2 block of RGBA8 pixels according to `mode`.
+fn average_block(pixels: &[[u8; 4]], mode: MipmapMode) -> [u8; 4] {
+    let n = pixels.len() as f32;
+    match mode {
+        MipmapMode::Linear => {
+            let mut rgba = [0u32; 4];
+            for p in pixels {
+                for i in 0..4 {
+                    rgba[i] += p[i] as u32;
+                }
+            }
+            let count = pixels.len() as u32;
+            [
+                (rgba[0] / count) as u8,
+                (rgba[1] / count) as u8,
+                (rgba[2] / count) as u8,
+                (rgba[3] / count) as u8,
+            ]
+        }
+        MipmapMode::Srgb => {
+            // Linearise, average in linear light, re-encode as sRGB.
+            // Alpha is always linear — average directly.
+            let mut r = 0.0f32;
+            let mut g = 0.0f32;
+            let mut b = 0.0f32;
+            let mut a = 0u32;
+            for p in pixels {
+                r += srgb_to_linear(p[0]);
+                g += srgb_to_linear(p[1]);
+                b += srgb_to_linear(p[2]);
+                a += p[3] as u32;
+            }
+            [
+                linear_to_srgb(r / n),
+                linear_to_srgb(g / n),
+                linear_to_srgb(b / n),
+                (a / pixels.len() as u32) as u8,
+            ]
+        }
+        MipmapMode::Normal => {
+            // Decode XYZ from [0,255] → [-1,1], average, renormalize, re-encode.
+            // Without renormalization, averaging +X and -X gives a zero vector
+            // which produces black pixels and NaN propagation in PBR shaders.
+            let mut nx = 0.0f32;
+            let mut ny = 0.0f32;
+            let mut nz = 0.0f32;
+            for p in pixels {
+                nx += p[0] as f32 / 127.5 - 1.0;
+                ny += p[1] as f32 / 127.5 - 1.0;
+                nz += p[2] as f32 / 127.5 - 1.0;
+            }
+            nx /= n;
+            ny /= n;
+            nz /= n;
+            let len = (nx * nx + ny * ny + nz * nz).sqrt().max(1e-6);
+            nx /= len;
+            ny /= len;
+            nz /= len;
+            let enc = |v: f32| ((v * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
+            [enc(nx), enc(ny), enc(nz), 255]
+        }
     }
 }
 
 /// Recursively downsamples a base RGBA8 image to generate all mipmap levels.
 ///
 /// Appends each successive level (half width, half height) directly onto
-/// `data` using a 2×2 box filter.  Non-power-of-two dimensions are handled
-/// by clamping the source 2×2 block to the actual image boundary.
+/// `data` using a 2×2 box filter.  `mode` controls how the box filter
+/// averages pixels — see [`MipmapMode`].  Non-power-of-two dimensions are
+/// handled by clamping the source 2×2 block to the actual image boundary.
 ///
 /// Returns the expanded buffer and the total number of mip levels
 /// (including level 0).
-fn generate_mipmaps_rgba(mut data: Vec<u8>, base_width: u32, base_height: u32) -> (Vec<u8>, u32) {
+fn generate_mipmaps(
+    mut data: Vec<u8>,
+    base_width: u32,
+    base_height: u32,
+    mode: MipmapMode,
+) -> (Vec<u8>, u32) {
     let mut mip_level_count = 1u32;
     let mut current_width = base_width as usize;
     let mut current_height = base_height as usize;
@@ -183,15 +288,11 @@ fn generate_mipmaps_rgba(mut data: Vec<u8>, base_width: u32, base_height: u32) -
         for y in 0..next_height {
             for x in 0..next_width {
                 let dst_idx = next_offset + (y * next_width + x) * 4;
-
                 let sx = x * 2;
                 let sy = y * 2;
 
-                let mut r = 0u32;
-                let mut g = 0u32;
-                let mut b = 0u32;
-                let mut a = 0u32;
-                let mut samples = 0u32;
+                let mut pixels = [[0u8; 4]; 4];
+                let mut count = 0usize;
 
                 for dy in 0..2usize {
                     if sy + dy >= current_height {
@@ -202,18 +303,21 @@ fn generate_mipmaps_rgba(mut data: Vec<u8>, base_width: u32, base_height: u32) -
                             continue;
                         }
                         let src_idx = prev_offset + ((sy + dy) * current_width + (sx + dx)) * 4;
-                        r += data[src_idx] as u32;
-                        g += data[src_idx + 1] as u32;
-                        b += data[src_idx + 2] as u32;
-                        a += data[src_idx + 3] as u32;
-                        samples += 1;
+                        pixels[count] = [
+                            data[src_idx],
+                            data[src_idx + 1],
+                            data[src_idx + 2],
+                            data[src_idx + 3],
+                        ];
+                        count += 1;
                     }
                 }
 
-                data[dst_idx] = (r / samples) as u8;
-                data[dst_idx + 1] = (g / samples) as u8;
-                data[dst_idx + 2] = (b / samples) as u8;
-                data[dst_idx + 3] = (a / samples) as u8;
+                let avg = average_block(&pixels[..count], mode);
+                data[dst_idx] = avg[0];
+                data[dst_idx + 1] = avg[1];
+                data[dst_idx + 2] = avg[2];
+                data[dst_idx + 3] = avg[3];
             }
         }
 
@@ -232,12 +336,14 @@ fn make_image(
     height: u32,
     format: TextureFormat,
     address_mode: ImageAddressMode,
+    mipmap_mode: MipmapMode,
 ) -> Image {
     let base_size = (width as usize) * (height as usize) * 4;
-    let (mip_data, mip_level_count) = generate_mipmaps_rgba(data, width, height);
+    let (mip_data, mip_level_count) = generate_mipmaps(data, width, height, mipmap_mode);
 
     // Image::new validates data.len() == width * height * bytes_per_pixel,
-    // so we construct with the level-0 slice, then overwrite with the full chain.
+    // so we construct with a zeroed level-0 dummy (avoids copying mip_data),
+    // then overwrite image.data with the full mip chain.
     let mut image = Image::new(
         Extent3d {
             width,
@@ -245,7 +351,7 @@ fn make_image(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        mip_data[..base_size].to_vec(),
+        vec![0u8; base_size],
         format,
         RenderAssetUsages::default(),
     );

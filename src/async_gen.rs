@@ -43,7 +43,11 @@ fn gen_pool() -> &'static rayon::ThreadPool {
     })
 }
 
-use std::sync::{OnceLock, mpsc};
+use std::sync::{
+    Arc, OnceLock,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
 
 use bevy::{
     asset::Assets,
@@ -76,52 +80,66 @@ use crate::{
 /// a dedicated pool avoids the problem while bounding OS thread and memory
 /// usage.  [`poll_texture_tasks`] non-blockingly checks for completion each
 /// frame using [`mpsc::Receiver::try_recv`].
+///
+/// Dropping `PendingTexture` (e.g. when the entity is despawned) sets an
+/// atomic cancellation flag.  Tasks that have not yet started will see the
+/// flag and exit without doing any work, preventing zombie tasks from
+/// saturating the thread pool when entities are rapidly spawned and destroyed.
 #[derive(Component)]
 pub struct PendingTexture {
     // Wrapped in Mutex so the struct is Sync, which Bevy's Component bound requires.
     pub(crate) rx: std::sync::Mutex<mpsc::Receiver<Result<TextureMap, TextureError>>>,
+    /// Set to `true` on drop; the background task checks this before starting.
+    cancelled: Arc<AtomicBool>,
     /// `true` for foliage cards (leaf, twig) that need a clamp-to-edge sampler.
     is_card: bool,
+}
+
+impl Drop for PendingTexture {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+/// Shared constructor body: creates the channel + cancellation flag, spawns the
+/// task, and returns a `PendingTexture`.  The closure `f` is the generator call.
+fn spawn_task<F>(f: F, is_card: bool) -> PendingTexture
+where
+    F: FnOnce() -> Result<TextureMap, TextureError> + Send + 'static,
+{
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancelled);
+    let (tx, rx) = mpsc::sync_channel(1);
+    gen_pool().spawn(move || {
+        // Skip the entire computation if the entity was already despawned.
+        if !flag.load(Ordering::Relaxed) {
+            tx.send(f()).ok();
+        }
+    });
+    PendingTexture {
+        rx: std::sync::Mutex::new(rx),
+        cancelled,
+        is_card,
+    }
 }
 
 impl PendingTexture {
     /// Spawn a bark texture generation thread at `width × height` texels.
     pub fn bark(config: BarkConfig, width: u32, height: u32) -> Self {
         let generator = BarkGenerator::new(config);
-        let (tx, rx) = mpsc::sync_channel(1);
-        gen_pool().spawn(move || {
-            tx.send(generator.generate(width, height)).ok();
-        });
-        Self {
-            rx: std::sync::Mutex::new(rx),
-            is_card: false,
-        }
+        spawn_task(move || generator.generate(width, height), false)
     }
 
     /// Spawn a rock texture generation thread at `width × height` texels.
     pub fn rock(config: RockConfig, width: u32, height: u32) -> Self {
         let generator = RockGenerator::new(config);
-        let (tx, rx) = mpsc::sync_channel(1);
-        gen_pool().spawn(move || {
-            tx.send(generator.generate(width, height)).ok();
-        });
-        Self {
-            rx: std::sync::Mutex::new(rx),
-            is_card: false,
-        }
+        spawn_task(move || generator.generate(width, height), false)
     }
 
     /// Spawn a ground texture generation thread at `width × height` texels.
     pub fn ground(config: GroundConfig, width: u32, height: u32) -> Self {
         let generator = GroundGenerator::new(config);
-        let (tx, rx) = mpsc::sync_channel(1);
-        gen_pool().spawn(move || {
-            tx.send(generator.generate(width, height)).ok();
-        });
-        Self {
-            rx: std::sync::Mutex::new(rx),
-            is_card: false,
-        }
+        spawn_task(move || generator.generate(width, height), false)
     }
 
     /// Spawn a leaf texture generation thread at `width × height` texels.
@@ -131,14 +149,7 @@ impl PendingTexture {
     /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
         let generator = LeafGenerator::new(config);
-        let (tx, rx) = mpsc::sync_channel(1);
-        gen_pool().spawn(move || {
-            tx.send(generator.generate(width, height)).ok();
-        });
-        Self {
-            rx: std::sync::Mutex::new(rx),
-            is_card: true,
-        }
+        spawn_task(move || generator.generate(width, height), true)
     }
 
     /// Spawn a twig texture generation thread at `width × height` texels.
@@ -148,14 +159,7 @@ impl PendingTexture {
     /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
         let generator = TwigGenerator::new(config);
-        let (tx, rx) = mpsc::sync_channel(1);
-        gen_pool().spawn(move || {
-            tx.send(generator.generate(width, height)).ok();
-        });
-        Self {
-            rx: std::sync::Mutex::new(rx),
-            is_card: true,
-        }
+        spawn_task(move || generator.generate(width, height), true)
     }
 }
 

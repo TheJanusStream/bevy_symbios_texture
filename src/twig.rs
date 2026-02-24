@@ -264,6 +264,9 @@ impl TextureGenerator for TwigGenerator {
         let h = height as usize;
         let n = w * h;
 
+        // The terminal leaf caps the stem; suppress stem rendering above it.
+        let term_v = terminal_v(c);
+
         let mut heights = vec![0.5f64; n];
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
@@ -311,7 +314,10 @@ impl TextureGenerator for TwigGenerator {
                 }
 
                 // --- Stem SDF (lower priority than leaves) ---
-                if s_hw > 1e-9 && dist_to_stem < s_hw {
+                // Do not draw the stem above the terminal leaf attachment: the
+                // terminal leaf covers that region intentionally, and the bare
+                // stem tip would visibly pierce through the apex leaf.
+                if s_hw > 1e-9 && dist_to_stem < s_hw && pv >= term_v {
                     // Bright ridge at the stem centre.
                     let t = 1.0 - (dist_to_stem / s_hw) as f32;
                     heights[idx] = t as f64 * 0.6;
@@ -341,6 +347,8 @@ impl TextureGenerator for TwigGenerator {
                 }
             }
         }
+
+        crate::normal::dilate_heights(&mut heights, &albedo, w, h);
 
         let normal = height_to_normal(
             &heights,

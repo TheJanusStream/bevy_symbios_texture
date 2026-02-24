@@ -380,6 +380,11 @@ impl TextureGenerator for LeafGenerator {
             }
         }
 
+        // Expand opaque heights 1 px into the transparent border so the
+        // central-difference kernel does not see an artificial cliff at the
+        // silhouette edge (which would produce a glowing/black rim artifact).
+        crate::normal::dilate_heights(&mut heights, &albedo, w, h);
+
         let normal = height_to_normal(
             &heights,
             width,
@@ -417,7 +422,9 @@ fn lobe_envelope(base: f64, v: f64, config: &LeafConfig) -> f64 {
     let cos_val = (v * (2.0 * config.lobe_count + 1.0) * PI).cos();
     // sign-preserving power: keeps valleys negative so they indent the envelope.
     let shaped = cos_val.signum() * cos_val.abs().powf(config.lobe_sharpness.max(0.1));
-    (base * (1.0 + shaped * config.lobe_depth)).max(0.0)
+    // Cap at 0.49 so lobed leaves never reach the texture boundary regardless
+    // of lobe_depth — values ≥ 0.5 would slice the leaf at the quad edge.
+    (base * (1.0 + shaped * config.lobe_depth)).clamp(0.0, 0.49)
 }
 
 /// Half-width of the leaf envelope at normalised V position.

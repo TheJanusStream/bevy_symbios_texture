@@ -65,12 +65,19 @@ pub fn height_to_normal(
             let above = heights[ym * w + x];
             let below = heights[yp * w + x];
 
-            // True derivative: divide height difference by pixel spacing in UV
-            // space (2/width for central differences).  Equivalent to
-            // multiplying by width/2.  This makes gradient magnitude
-            // resolution-independent.
-            let dx = (right - left) * s * w as f64 * 0.5;
-            let dy = (below - above) * s * h as f64 * 0.5;
+            // True derivative: divide height difference by the actual sample
+            // spacing in UV space.  Wrap mode always uses a central difference
+            // (spacing = 2/width), so x_dist is always 2.  Clamp mode uses a
+            // one-sided difference at the edges (spacing = 1/width, x_dist 1)
+            // and a central difference in the interior (x_dist 2).
+            // NOTE: under Wrap, xm may be larger than xp (e.g. xm=w-1, xp=1),
+            // so we must not compute `xp - xm` directly — that would underflow.
+            let (x_dist, y_dist) = match boundary {
+                BoundaryMode::Wrap => (2.0f64, 2.0f64),
+                BoundaryMode::Clamp => ((xp - xm) as f64, (yp - ym) as f64),
+            };
+            let dx = (right - left) * s * w as f64 / x_dist;
+            let dy = (below - above) * s * h as f64 / y_dist;
 
             // Normal = normalize(-dx, dy, 1) in Bevy / OpenGL tangent space.
             //
@@ -92,6 +99,47 @@ pub fn height_to_normal(
     }
 
     out
+}
+
+/// Dilate opaque-pixel heights one step into the transparent border.
+///
+/// For each transparent pixel (`albedo[idx*4 + 3] == 0`) that has at least
+/// one opaque 4-connected neighbour, replace its height with the average of
+/// those neighbours.  Pixels that remain fully surrounded by transparency
+/// keep their original value (0.5 neutral flat).
+///
+/// Call this **before** [`height_to_normal`] on foliage cards so the central-
+/// difference kernel does not see an artificial height cliff at the silhouette
+/// edge.  One dilation pass is sufficient because the kernel only samples one
+/// pixel away.
+pub(crate) fn dilate_heights(heights: &mut [f64], albedo: &[u8], w: usize, h: usize) {
+    let mut dilated = heights.to_vec();
+    for y in 0..h {
+        for x in 0..w {
+            let idx = y * w + x;
+            if albedo[idx * 4 + 3] != 0 {
+                continue; // opaque — leave unchanged
+            }
+            let mut sum = 0.0f64;
+            let mut count = 0usize;
+            for (dy, dx) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let ny = y as i32 + dy;
+                let nx = x as i32 + dx;
+                if ny < 0 || ny >= h as i32 || nx < 0 || nx >= w as i32 {
+                    continue;
+                }
+                let nidx = ny as usize * w + nx as usize;
+                if albedo[nidx * 4 + 3] != 0 {
+                    sum += heights[nidx];
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                dilated[idx] = sum / count as f64;
+            }
+        }
+    }
+    heights.copy_from_slice(&dilated);
 }
 
 #[inline]
