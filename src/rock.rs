@@ -8,7 +8,7 @@ use noise::{MultiFractal, Perlin, RidgedMulti};
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
     noise::{ToroidalNoise, normalize, sample_grid},
-    normal::height_to_normal,
+    normal::{BoundaryMode, height_to_normal},
 };
 
 /// Configures the appearance of a [`RockGenerator`].
@@ -100,7 +100,13 @@ impl TextureGenerator for RockGenerator {
 
         // heights is in [-1, 1]; normalize would scale gradients by 0.5.
         // Halving strength here is equivalent and avoids a full-sized allocation.
-        let normal = height_to_normal(&heights, width, height, c.normal_strength * 0.5);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.normal_strength * 0.5,
+            BoundaryMode::Wrap,
+        );
 
         Ok(TextureMap {
             albedo,

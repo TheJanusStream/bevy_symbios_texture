@@ -6,8 +6,12 @@
 //!  3. Sample a third FBM layer at the warped UV coordinates for the final value.
 //!  4. Derive colour, roughness and a height field from the result.
 //!
-//! Computing the warp layers inline (rather than storing full W×H grids) avoids
-//! two large intermediate allocations that would otherwise total ~1 GB at 8 K.
+//! The warp layers are computed inline (no intermediate grids).  The base FBM
+//! layer is precomputed into a W×H grid (~536 MB at 8 K) once, then sampled
+//! via bilinear interpolation at the warped coordinates.  This trades one
+//! allocation for the elimination of O(W×H) `sin`/`cos` calls that would
+//! otherwise occur when evaluating the toroidal base noise at arbitrary warped
+//! positions.
 
 use std::f64::consts::TAU;
 
@@ -16,8 +20,8 @@ use noise::{Fbm, MultiFractal, NoiseFn, Perlin, Worley};
 
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::ToroidalNoise,
-    normal::height_to_normal,
+    noise::{ToroidalNoise, sample_grid},
+    normal::{BoundaryMode, height_to_normal},
 };
 
 /// Configures the appearance of a [`BarkGenerator`].
@@ -142,6 +146,11 @@ impl TextureGenerator for BarkGenerator {
             .map(|y| (TAU * y as f64 / h as f64).sin() * f_freq_v)
             .collect();
 
+        // Precompute the base noise on a regular grid using the torus LUTs
+        // (O(W+H) trig calls).  The warped lookup then becomes a cheap
+        // bilinear interpolation rather than per-pixel sin/cos evaluation.
+        let base_grid = sample_grid(&base_noise, width, height);
+
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
@@ -159,12 +168,13 @@ impl TextureGenerator for BarkGenerator {
                 let ny = col_sin[x];
                 let u = x as f64 / w as f64;
 
-                // Compute warp offsets inline — no full-grid storage needed.
+                // Compute warp offsets using precomputed torus coordinates.
                 let du = warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
                 let dv = warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
 
-                // The warped UV can't use the precomputed tables, so call get().
-                let raw = base_noise.get(u + du, v + dv);
+                // Sample the precomputed base grid at the warped UV coordinates.
+                // Bilinear interpolation wraps toroidally — no trig per pixel.
+                let raw = bilinear_sample_torus(&base_grid, w, h, u + du, v + dv);
                 let t = normalize(raw); // [0, 1]
 
                 // --- Worley rhytidome plates ---
@@ -206,7 +216,13 @@ impl TextureGenerator for BarkGenerator {
             }
         }
 
-        let normal = height_to_normal(&heights, width, height, c.normal_strength);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.normal_strength,
+            BoundaryMode::Wrap,
+        );
 
         Ok(TextureMap {
             albedo,
@@ -229,4 +245,35 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 #[inline]
 fn normalize(v: f64) -> f64 {
     v * 0.5 + 0.5
+}
+
+/// Bilinearly interpolate a value from a toroidal (seamlessly tiling) grid.
+///
+/// `u` and `v` are in UV space and may fall outside `[0, 1]`; they are wrapped
+/// before sampling so the lookup is always valid.  This is used to fetch the
+/// domain-warped base noise value without additional `sin`/`cos` calls.
+#[inline]
+fn bilinear_sample_torus(grid: &[f64], w: usize, h: usize, u: f64, v: f64) -> f64 {
+    // Wrap UV into [0, 1).
+    let u = u.rem_euclid(1.0);
+    let v = v.rem_euclid(1.0);
+
+    // Convert to fractional pixel coordinates.
+    let px = u * w as f64;
+    let py = v * h as f64;
+
+    let x0 = px as usize % w;
+    let y0 = py as usize % h;
+    let x1 = (x0 + 1) % w;
+    let y1 = (y0 + 1) % h;
+
+    let fx = px.fract();
+    let fy = py.fract();
+
+    let v00 = grid[y0 * w + x0];
+    let v10 = grid[y0 * w + x1];
+    let v01 = grid[y1 * w + x0];
+    let v11 = grid[y1 * w + x1];
+
+    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }

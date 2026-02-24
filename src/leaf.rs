@@ -23,7 +23,7 @@ use noise::{NoiseFn, Perlin, Worley};
 
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    normal::height_to_normal,
+    normal::{BoundaryMode, height_to_normal},
 };
 
 // --- tuning constants -------------------------------------------------------
@@ -380,7 +380,13 @@ impl TextureGenerator for LeafGenerator {
             }
         }
 
-        let normal = height_to_normal(&heights, width, height, self.config.normal_strength);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            self.config.normal_strength,
+            BoundaryMode::Clamp,
+        );
 
         Ok(TextureMap {
             albedo,

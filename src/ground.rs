@@ -9,7 +9,7 @@ use noise::{Fbm, MultiFractal, Perlin};
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
     noise::{ToroidalNoise, normalize},
-    normal::height_to_normal,
+    normal::{BoundaryMode, height_to_normal},
 };
 
 /// Configures the appearance of a [`GroundGenerator`].
@@ -118,7 +118,13 @@ impl TextureGenerator for GroundGenerator {
             }
         }
 
-        let normal = height_to_normal(&heights, width, height, c.normal_strength);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.normal_strength,
+            BoundaryMode::Wrap,
+        );
 
         Ok(TextureMap {
             albedo,

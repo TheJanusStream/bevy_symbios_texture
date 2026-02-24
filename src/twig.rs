@@ -29,7 +29,7 @@ use noise::{NoiseFn, Perlin};
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
     leaf::{LeafConfig, LeafSampler},
-    normal::height_to_normal,
+    normal::{BoundaryMode, height_to_normal},
 };
 
 // --- tuning constants -------------------------------------------------------
@@ -150,13 +150,24 @@ impl TwigGenerator {
     /// Opposite leaf pairs + terminal leaf.
     fn monopodial_attachments(&self, n: usize, perlin: &Perlin) -> Vec<LeafAttachment> {
         let c = &self.config;
-        // 2 leaves per node + 1 terminal.
+        // 1 terminal + 2 leaves per node.
         let mut atts = Vec::with_capacity(n * 2 + 1);
 
         // The terminal leaf card extends toward the tip (v=0) by `leaf_scale *
         // TERMINAL_SCALE` texture units.  Push its attachment point far enough
         // from the edge that the whole card stays inside the texture.
         let term_v = terminal_v(c);
+
+        // Terminal leaf is inserted first so it wins the per-pixel Z-order
+        // loop in `generate` (first hit breaks).  This prevents lateral leaves
+        // with acroscopic angles from occluding the apex.
+        let term_tangent = stem_tangent_at(term_v, c, perlin);
+        atts.push(LeafAttachment {
+            attach_u: stem_center_u(term_v, c, perlin),
+            attach_v: term_v,
+            angle: term_tangent + PI, // pointing toward tip (upward)
+            scale: c.leaf_scale * TERMINAL_SCALE,
+        });
 
         // Lateral leaves run from just below the terminal to near the base.
         let lat_start = term_v + 0.05;
@@ -181,15 +192,6 @@ impl TwigGenerator {
             });
         }
 
-        // Terminal leaf: points back along the stem (upward = +PI from downward).
-        let term_tangent = stem_tangent_at(term_v, c, perlin);
-        atts.push(LeafAttachment {
-            attach_u: stem_center_u(term_v, c, perlin),
-            attach_v: term_v,
-            angle: term_tangent + PI, // pointing toward tip (upward)
-            scale: c.leaf_scale * TERMINAL_SCALE,
-        });
-
         atts
     }
 
@@ -203,10 +205,20 @@ impl TwigGenerator {
     /// **convex** (outer) side of each bend.
     fn sympodial_attachments(&self, n: usize, perlin: &Perlin) -> Vec<LeafAttachment> {
         let c = &self.config;
-        // 1 leaf per node + 1 terminal.
+        // 1 terminal + 1 leaf per node.
         let mut atts = Vec::with_capacity(n + 1);
 
         let term_v = terminal_v(c);
+
+        // Terminal leaf first — wins Z-order over lateral leaves.
+        let term_tangent = stem_tangent_at(term_v, c, perlin);
+        atts.push(LeafAttachment {
+            attach_u: stem_center_u(term_v, c, perlin),
+            attach_v: term_v,
+            angle: term_tangent + PI,
+            scale: c.leaf_scale * TERMINAL_SCALE,
+        });
+
         let lat_start = term_v + 0.05;
         let lat_span = 0.88 - lat_start;
 
@@ -231,15 +243,6 @@ impl TwigGenerator {
                 scale: c.leaf_scale,
             });
         }
-
-        // Terminal leaf.
-        let term_tangent = stem_tangent_at(term_v, c, perlin);
-        atts.push(LeafAttachment {
-            attach_u: stem_center_u(term_v, c, perlin),
-            attach_v: term_v,
-            angle: term_tangent + PI,
-            scale: c.leaf_scale * TERMINAL_SCALE,
-        });
 
         atts
     }
@@ -339,7 +342,13 @@ impl TextureGenerator for TwigGenerator {
             }
         }
 
-        let normal = height_to_normal(&heights, width, height, c.leaf.normal_strength);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.leaf.normal_strength,
+            BoundaryMode::Clamp,
+        );
 
         Ok(TextureMap {
             albedo,
@@ -510,11 +519,12 @@ mod tests {
         };
         let twig_gen = TwigGenerator::new(config.clone());
         let atts = twig_gen.leaf_attachments(&make_stem_perlin(&config));
-        // Each pair (excluding the terminal) should have opposite angles.
+        // atts[0] is the terminal; lateral pairs start at index 1.
+        // Each pair should have opposite angles (sum to zero for straight stem).
         let n = config.leaf_pairs;
         for i in 0..n {
-            let right = &atts[i * 2];
-            let left = &atts[i * 2 + 1];
+            let right = &atts[1 + i * 2];
+            let left = &atts[1 + i * 2 + 1];
             assert!(
                 (right.angle + left.angle).abs() < 1e-9,
                 "monopodial pair {i}: angles should sum to zero (got {} + {})",
@@ -534,8 +544,9 @@ mod tests {
         };
         let twig_gen = TwigGenerator::new(config.clone());
         let atts = twig_gen.leaf_attachments(&make_stem_perlin(&config));
+        // atts[0] is the terminal; lateral leaves are at indices 1..=leaf_pairs.
         // Alternate: right (positive angle), left (negative), right, left, …
-        for (i, att) in atts.iter().take(config.leaf_pairs).enumerate() {
+        for (i, att) in atts.iter().skip(1).take(config.leaf_pairs).enumerate() {
             let expected_sign = if i % 2 == 0 { 1.0_f64 } else { -1.0 };
             assert!(
                 att.angle * expected_sign > 0.0,
@@ -630,7 +641,10 @@ mod tests {
             for seed in [0u32, 1, 42] {
                 let config = TwigConfig {
                     sympodial,
-                    leaf: crate::leaf::LeafConfig { seed, ..Default::default() },
+                    leaf: crate::leaf::LeafConfig {
+                        seed,
+                        ..Default::default()
+                    },
                     ..TwigConfig::default()
                 };
                 let perlin = make_stem_perlin(&config);

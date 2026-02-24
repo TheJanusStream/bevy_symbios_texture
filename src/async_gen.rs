@@ -1,9 +1,11 @@
 //! Async texture generation system.
 //!
-//! Offloads the CPU-intensive pixel math to Bevy's `AsyncComputeTaskPool` so
-//! it does not stall the main thread.  When the task finishes the images are
-//! uploaded to [`Assets<Image>`] and the result entity receives the
-//! [`TextureReady`] component.
+//! Offloads the CPU-intensive pixel math to a private, bounded [`rayon`]
+//! thread pool so it does not stall the main thread.  The pool is limited to
+//! [`MAX_GENERATION_THREADS`] concurrent tasks; excess requests are queued and
+//! run in order rather than spawning unbounded OS threads.  When a task
+//! finishes the images are uploaded to [`Assets<Image>`] and the result entity
+//! receives the [`TextureReady`] component.
 //!
 //! # Usage
 //! ```rust,ignore
@@ -19,7 +21,29 @@
 //! // Later, query for TextureReady to consume the handles.
 //! ```
 
-use std::sync::mpsc;
+/// Maximum number of texture generation tasks that run concurrently.
+///
+/// Additional tasks are queued inside the rayon pool rather than spawning new
+/// OS threads, bounding both CPU and memory usage.
+const MAX_GENERATION_THREADS: usize = 4;
+
+/// Returns the library-private rayon thread pool used for texture generation.
+///
+/// Isolated from the application's global rayon pool so texture work does not
+/// starve unrelated parallel workloads and the concurrency cap is enforced
+/// regardless of the calling application's rayon configuration.
+fn gen_pool() -> &'static rayon::ThreadPool {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(MAX_GENERATION_THREADS)
+            .thread_name(|i| format!("texture-gen-{i}"))
+            .build()
+            .expect("failed to build texture generation thread pool")
+    })
+}
+
+use std::sync::{OnceLock, mpsc};
 
 use bevy::{
     asset::Assets,
@@ -45,12 +69,13 @@ use crate::{
 
 /// Spawned onto an entity to request background texture generation.
 ///
-/// Each constructor offloads `generate()` onto a dedicated OS thread via
-/// [`std::thread::spawn`].  Because `generate()` is a monolithic blocking
-/// loop with no yield points, using Bevy's `AsyncComputeTaskPool` would
-/// starve other tasks on that executor; a dedicated thread avoids the problem
-/// entirely.  [`poll_texture_tasks`] non-blockingly checks for completion
-/// each frame using [`mpsc::Receiver::try_recv`].
+/// Each constructor submits `generate()` to the private [`gen_pool`] rayon
+/// pool (capped at [`MAX_GENERATION_THREADS`] concurrent tasks).  Because
+/// `generate()` is a monolithic blocking loop with no yield points, using
+/// Bevy's `AsyncComputeTaskPool` would starve other tasks on that executor;
+/// a dedicated pool avoids the problem while bounding OS thread and memory
+/// usage.  [`poll_texture_tasks`] non-blockingly checks for completion each
+/// frame using [`mpsc::Receiver::try_recv`].
 #[derive(Component)]
 pub struct PendingTexture {
     // Wrapped in Mutex so the struct is Sync, which Bevy's Component bound requires.
@@ -64,24 +89,39 @@ impl PendingTexture {
     pub fn bark(config: BarkConfig, width: u32, height: u32) -> Self {
         let generator = BarkGenerator::new(config);
         let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::spawn(move || { tx.send(generator.generate(width, height)).ok(); });
-        Self { rx: std::sync::Mutex::new(rx), is_card: false }
+        gen_pool().spawn(move || {
+            tx.send(generator.generate(width, height)).ok();
+        });
+        Self {
+            rx: std::sync::Mutex::new(rx),
+            is_card: false,
+        }
     }
 
     /// Spawn a rock texture generation thread at `width × height` texels.
     pub fn rock(config: RockConfig, width: u32, height: u32) -> Self {
         let generator = RockGenerator::new(config);
         let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::spawn(move || { tx.send(generator.generate(width, height)).ok(); });
-        Self { rx: std::sync::Mutex::new(rx), is_card: false }
+        gen_pool().spawn(move || {
+            tx.send(generator.generate(width, height)).ok();
+        });
+        Self {
+            rx: std::sync::Mutex::new(rx),
+            is_card: false,
+        }
     }
 
     /// Spawn a ground texture generation thread at `width × height` texels.
     pub fn ground(config: GroundConfig, width: u32, height: u32) -> Self {
         let generator = GroundGenerator::new(config);
         let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::spawn(move || { tx.send(generator.generate(width, height)).ok(); });
-        Self { rx: std::sync::Mutex::new(rx), is_card: false }
+        gen_pool().spawn(move || {
+            tx.send(generator.generate(width, height)).ok();
+        });
+        Self {
+            rx: std::sync::Mutex::new(rx),
+            is_card: false,
+        }
     }
 
     /// Spawn a leaf texture generation thread at `width × height` texels.
@@ -92,8 +132,13 @@ impl PendingTexture {
     pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
         let generator = LeafGenerator::new(config);
         let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::spawn(move || { tx.send(generator.generate(width, height)).ok(); });
-        Self { rx: std::sync::Mutex::new(rx), is_card: true }
+        gen_pool().spawn(move || {
+            tx.send(generator.generate(width, height)).ok();
+        });
+        Self {
+            rx: std::sync::Mutex::new(rx),
+            is_card: true,
+        }
     }
 
     /// Spawn a twig texture generation thread at `width × height` texels.
@@ -104,8 +149,13 @@ impl PendingTexture {
     pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
         let generator = TwigGenerator::new(config);
         let (tx, rx) = mpsc::sync_channel(1);
-        std::thread::spawn(move || { tx.send(generator.generate(width, height)).ok(); });
-        Self { rx: std::sync::Mutex::new(rx), is_card: true }
+        gen_pool().spawn(move || {
+            tx.send(generator.generate(width, height)).ok();
+        });
+        Self {
+            rx: std::sync::Mutex::new(rx),
+            is_card: true,
+        }
     }
 }
 
@@ -120,7 +170,11 @@ pub fn poll_texture_tasks(
     mut images: ResMut<Assets<Image>>,
 ) {
     for (entity, pending) in &tasks {
-        let poll = pending.rx.lock().expect("texture thread poisoned").try_recv();
+        let poll = pending
+            .rx
+            .lock()
+            .expect("texture thread poisoned")
+            .try_recv();
         match poll {
             Ok(Ok(map)) => {
                 let handles = if pending.is_card {
