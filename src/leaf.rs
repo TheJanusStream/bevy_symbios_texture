@@ -66,7 +66,7 @@ pub struct LeafConfig {
     pub micro_detail: f64,
     /// Normal map strength.
     pub normal_strength: f32,
-    /// Number of periodic lobe half-cycles along the leaf length.
+    /// Number of visible lobes (bumps) along each side of the leaf blade.
     /// `0.0` = no lobes (smooth envelope); `4.0` = four bumps per side.
     pub lobe_count: f64,
     /// Lobe modulation depth as a fraction of the base envelope width.
@@ -217,7 +217,9 @@ impl LeafSampler {
         // proportional everywhere — preventing noise larger than the envelope
         // from punching isolated holes near the narrow leaf tip.
         let raw_dist = (u - 0.5).abs();
-        let serration = self.perlin.get([u * SERRATION_FREQ, v_blade * SERRATION_FREQ])
+        let serration = self
+            .perlin
+            .get([u * SERRATION_FREQ, v_blade * SERRATION_FREQ])
             * c.serration_strength
             * effective_envelope;
         if raw_dist + serration >= effective_envelope {
@@ -240,7 +242,9 @@ impl LeafSampler {
 
         // Secondary veins: symmetric chevron ridges branching from the midrib.
         // powf(4) narrows the broad sine wave into distinct vein lines.
-        let vein_freq = c.vein_count * 2.0;
+        // sin().abs() has period PI, so vein_count pairs requires the argument
+        // to span vein_count * PI over v_blade ∈ [0, 1].
+        let vein_freq = c.vein_count * PI;
         let secondary = (v_blade * vein_freq - raw_dist * vein_freq * c.vein_angle)
             .sin()
             .abs()
@@ -281,8 +285,7 @@ impl LeafSampler {
         let blade_r = lerp(c.color_base[0], c.color_edge[0], edge_t);
         let blade_g = lerp(c.color_base[1], c.color_edge[1], edge_t);
         let blade_b = lerp(c.color_base[2], c.color_edge[2], edge_t);
-        let vein_brightness =
-            (midrib as f32 * 0.6 + secondary as f32 * 0.4).clamp(0.0, 1.0) * 0.18;
+        let vein_brightness = (midrib as f32 * 0.6 + secondary as f32 * 0.4).clamp(0.0, 1.0) * 0.18;
         let color = [
             (blade_r + vein_brightness).min(1.0),
             (blade_g + vein_brightness * 0.75).min(1.0),
@@ -349,7 +352,13 @@ impl TextureGenerator for LeafGenerator {
 
                 match sampler.sample(u, v) {
                     None => {
-                        // Fully transparent — leave albedo RGB as zero.
+                        // Fully transparent — write edge color into RGB so bilinear
+                        // filtering at silhouette boundaries blends into a matching
+                        // hue rather than black, preventing dark halos.
+                        let ec = &self.config.color_edge;
+                        albedo[ai] = linear_to_srgb(ec[0]);
+                        albedo[ai + 1] = linear_to_srgb(ec[1]);
+                        albedo[ai + 2] = linear_to_srgb(ec[2]);
                         albedo[ai + 3] = 0;
                         roughness[ai] = 255; // occlusion
                         roughness[ai + 1] = 200; // roughness
@@ -388,7 +397,9 @@ impl TextureGenerator for LeafGenerator {
 /// Apply periodic lobe modulation to the base envelope half-width.
 ///
 /// Multiplies the base envelope by `1 + shaped * lobe_depth` where `shaped`
-/// is a sharpness-adjusted cosine of `v * lobe_count * π`.  Returns a value
+/// is a sharpness-adjusted cosine of `v * (2 * lobe_count + 1) * π`.  This
+/// places exactly `lobe_count` cosine maxima strictly inside `v ∈ (0, 1)`,
+/// so `lobe_count = N` produces N visible bumps per side.  Returns a value
 /// ≥ 0; negative results are clamped to 0 (full indentation).
 ///
 /// When `lobe_count == 0` or `lobe_depth == 0`, returns `base` unchanged.
@@ -397,7 +408,7 @@ fn lobe_envelope(base: f64, v: f64, config: &LeafConfig) -> f64 {
     if config.lobe_count <= 0.0 || config.lobe_depth <= 0.0 {
         return base;
     }
-    let cos_val = (v * config.lobe_count * PI).cos();
+    let cos_val = (v * (2.0 * config.lobe_count + 1.0) * PI).cos();
     // sign-preserving power: keeps valleys negative so they indent the envelope.
     let shaped = cos_val.signum() * cos_val.abs().powf(config.lobe_sharpness.max(0.1));
     (base * (1.0 + shaped * config.lobe_depth)).max(0.0)

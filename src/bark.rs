@@ -101,8 +101,7 @@ impl TextureGenerator for BarkGenerator {
 
         // Worley noise for rhytidome plates — frequency = 1.0 because we bake
         // the anisotropic scaling into the torus lookup tables below.
-        let worley = Worley::new(c.seed.wrapping_add(300))
-            .set_return_type(ReturnType::Distance);
+        let worley = Worley::new(c.seed.wrapping_add(300)).set_return_type(ReturnType::Distance);
 
         let w = width as usize;
         let h = height as usize;

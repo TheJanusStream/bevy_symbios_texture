@@ -31,14 +31,20 @@ const NORMAL_Y: f32 = -(TEX_SIZE as f32 * 0.5 + 20.0);
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "bevy_symbios_texture — click to mutate".into(),
-                resolution: ((SPACING * N_PANELS as f32 + 40.0) as u32, TEX_SIZE * 2 + 120).into(),
+        .add_plugins(
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "bevy_symbios_texture — click to mutate".into(),
+                    resolution: (
+                        (SPACING * N_PANELS as f32 + 40.0) as u32,
+                        TEX_SIZE * 2 + 120,
+                    )
+                        .into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+        )
         .add_plugins(SymbiosTexturePlugin)
         .add_systems(Startup, spawn_tasks)
         .add_systems(Update, (show_ready_textures, handle_click))

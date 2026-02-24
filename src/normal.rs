@@ -15,6 +15,9 @@
 ///
 /// `strength` scales the gradient — larger values produce more pronounced normals.
 pub fn height_to_normal(heights: &[f64], width: u32, height: u32, strength: f32) -> Vec<u8> {
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
     let w = width as usize;
     let h = height as usize;
     let s = strength as f64;

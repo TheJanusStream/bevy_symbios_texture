@@ -11,9 +11,8 @@
 //! // uploads them with map_to_images (repeat sampler).
 //! commands.spawn(PendingTexture::bark(BarkConfig::default(), 512, 512));
 //!
-//! // Foliage cards — async generation is supported, but poll_texture_tasks
-//! // uses map_to_images (repeat sampler).  For a clamp-to-edge sampler,
-//! // generate synchronously and call map_to_images_card yourself.
+//! // Foliage cards (leaf, twig) — poll_texture_tasks automatically uses
+//! // map_to_images_card (clamp-to-edge sampler) for these types.
 //! commands.spawn(PendingTexture::leaf(LeafConfig::default(), 512, 512));
 //! commands.spawn(PendingTexture::twig(TwigConfig::default(), 512, 512));
 //!
@@ -33,7 +32,10 @@ use bevy::{
 
 use crate::{
     bark::{BarkConfig, BarkGenerator},
-    generator::{GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images},
+    generator::{
+        GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images,
+        map_to_images_card,
+    },
     ground::{GroundConfig, GroundGenerator},
     leaf::{LeafConfig, LeafGenerator},
     rock::{RockConfig, RockGenerator},
@@ -42,7 +44,11 @@ use crate::{
 
 /// Spawned onto an entity to request async texture generation.
 #[derive(Component)]
-pub struct PendingTexture(pub(crate) Task<Result<TextureMap, TextureError>>);
+pub struct PendingTexture {
+    pub(crate) task: Task<Result<TextureMap, TextureError>>,
+    /// `true` for foliage cards (leaf, twig) that need a clamp-to-edge sampler.
+    is_card: bool,
+}
 
 impl PendingTexture {
     /// Spawn an async bark texture generation task at `width × height` texels.
@@ -50,7 +56,10 @@ impl PendingTexture {
         let generator = BarkGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
-        Self(task)
+        Self {
+            task,
+            is_card: false,
+        }
     }
 
     /// Spawn an async rock texture generation task at `width × height` texels.
@@ -58,7 +67,10 @@ impl PendingTexture {
         let generator = RockGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
-        Self(task)
+        Self {
+            task,
+            is_card: false,
+        }
     }
 
     /// Spawn an async ground texture generation task at `width × height` texels.
@@ -66,29 +78,40 @@ impl PendingTexture {
         let generator = GroundGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
-        Self(task)
+        Self {
+            task,
+            is_card: false,
+        }
     }
 
     /// Spawn an async leaf texture generation task at `width × height` texels.
     ///
-    /// Upload the result with [`map_to_images_card`](crate::generator::map_to_images_card)
-    /// to get a clamp-to-edge sampler suitable for foliage cards.
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
         let generator = LeafGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
-        Self(task)
+        Self {
+            task,
+            is_card: true,
+        }
     }
 
     /// Spawn an async twig texture generation task at `width × height` texels.
     ///
-    /// Upload the result with [`map_to_images_card`](crate::generator::map_to_images_card)
-    /// to get a clamp-to-edge sampler suitable for foliage cards.
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
         let generator = TwigGenerator::new(config);
         let task =
             AsyncComputeTaskPool::get().spawn(async move { generator.generate(width, height) });
-        Self(task)
+        Self {
+            task,
+            is_card: true,
+        }
     }
 }
 
@@ -103,10 +126,15 @@ pub fn poll_texture_tasks(
     mut images: ResMut<Assets<Image>>,
 ) {
     for (entity, mut pending) in &mut tasks {
-        if let Some(result) = block_on(future::poll_once(&mut pending.0)) {
+        if let Some(result) = block_on(future::poll_once(&mut pending.task)) {
+            let is_card = pending.is_card;
             match result {
                 Ok(map) => {
-                    let handles = map_to_images(map, &mut images);
+                    let handles = if is_card {
+                        map_to_images_card(map, &mut images)
+                    } else {
+                        map_to_images(map, &mut images)
+                    };
                     commands
                         .entity(entity)
                         .remove::<PendingTexture>()

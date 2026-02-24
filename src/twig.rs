@@ -320,6 +320,12 @@ impl TextureGenerator for TwigGenerator {
                 }
 
                 if !hit {
+                    // Write edge color into RGB to prevent dark halos from
+                    // bilinear filtering at silhouette boundaries.
+                    let ec = &c.leaf.color_edge;
+                    albedo[ai] = linear_to_srgb(ec[0]);
+                    albedo[ai + 1] = linear_to_srgb(ec[1]);
+                    albedo[ai + 2] = linear_to_srgb(ec[2]);
                     albedo[ai + 3] = 0;
                     roughness[ai] = 255;
                     roughness[ai + 1] = 200;
@@ -362,8 +368,19 @@ fn stem_center_u(pv: f64, config: &TwigConfig, perlin: &Perlin) -> f64 {
     let organic = perlin.get([pv * STEM_CURVE_FREQ, STEM_PERLIN_Y]) * config.stem_curve;
 
     // Sympodial zigzag: sine wave, amplitude = 0 at tip, grows toward base.
+    // Phase is computed over the lateral-leaf span [lat_start, 0.88] so that
+    // the sine extrema align with the attach_v positions from
+    // sympodial_attachments (which place leaves at normalized = (2k+1)/(2n)
+    // within that same span).
     let zigzag = if config.sympodial {
-        (pv * config.leaf_pairs as f64 * PI).sin() * config.stem_curve * SYMPODIAL_ZZ_SCALE * pv
+        let lat_start = terminal_v(config) + 0.05;
+        let lat_span = 0.88 - lat_start;
+        let phase = if lat_span > 0.0 {
+            (pv - lat_start) / lat_span * config.leaf_pairs as f64 * PI
+        } else {
+            0.0
+        };
+        phase.sin() * config.stem_curve * SYMPODIAL_ZZ_SCALE * pv
     } else {
         0.0
     };
@@ -380,13 +397,35 @@ fn stem_half_width_at(pv: f64, half_width: f64) -> f64 {
 }
 
 /// Angle of the stem tangent at `pv` from the downward direction (`+V`),
-/// computed via central-difference numerical derivative.
+/// computed via a numerical derivative.  Central differences are used in the
+/// interior; one-sided differences are used at the boundaries so the divisor
+/// always matches the actual sample spacing.
 fn stem_tangent_at(pv: f64, config: &TwigConfig, perlin: &Perlin) -> f64 {
     let delta = 0.005_f64;
-    let u_lo = stem_center_u((pv - delta).max(0.0), config, perlin);
-    let u_hi = stem_center_u((pv + delta).min(1.0), config, perlin);
+    let (u_lo, u_hi, dv) = if pv < delta {
+        // Forward difference at the lower boundary.
+        (
+            stem_center_u(pv, config, perlin),
+            stem_center_u(pv + delta, config, perlin),
+            delta,
+        )
+    } else if pv > 1.0 - delta {
+        // Backward difference at the upper boundary.
+        (
+            stem_center_u(pv - delta, config, perlin),
+            stem_center_u(pv, config, perlin),
+            delta,
+        )
+    } else {
+        // Central difference in the interior.
+        (
+            stem_center_u(pv - delta, config, perlin),
+            stem_center_u(pv + delta, config, perlin),
+            2.0 * delta,
+        )
+    };
     // du/dv: horizontal displacement per unit of V.
-    let du_dv = (u_hi - u_lo) / (2.0 * delta);
+    let du_dv = (u_hi - u_lo) / dv;
     // Angle from the downward (+V) direction.
     du_dv.atan2(1.0)
 }
