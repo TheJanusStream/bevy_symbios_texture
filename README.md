@@ -3,20 +3,21 @@
 Procedural, tileable texture generation for [Bevy](https://bevyengine.org/).
 
 Generates albedo, normal, and roughness (ORM) maps entirely on the CPU — no
-asset files required. All textures are seamlessly tileable by construction
-via toroidal 4-D noise mapping.
+asset files required. All surface textures are seamlessly tileable by
+construction via toroidal 4-D noise mapping. Foliage cards (leaf, twig) produce
+alpha-masked silhouettes and do not tile.
 
 ## Bevy compatibility
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.1                  | 0.18 |
+| 0.2                  | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.1"
+bevy_symbios_texture = "0.2"
 ```
 
 ## Quick start
@@ -85,34 +86,43 @@ fn on_ready(
 
 ## Generators
 
-All generators produce three maps:
+### Surface textures (tileable)
 
-| Map       | Format          | Contents                              |
-|-----------|-----------------|---------------------------------------|
-| `albedo`  | `Rgba8UnormSrgb`| Base colour                           |
-| `normal`  | `Rgba8Unorm`    | Tangent-space normal (R=X, G=Y, B=Z)  |
-| `roughness`| `Rgba8Unorm`   | ORM: R=Occlusion, G=Roughness, B=Metallic |
+All three tileable generators produce three seamlessly-repeating maps:
 
-### Bark
+| Map        | Format           | Contents                                  |
+|------------|------------------|-------------------------------------------|
+| `albedo`   | `Rgba8UnormSrgb` | Base colour                               |
+| `normal`   | `Rgba8Unorm`     | Tangent-space normal (R=X, G=Y, B=Z)      |
+| `roughness`| `Rgba8Unorm`     | ORM: R=Occlusion, G=Roughness, B=Metallic |
 
-Domain-warped FBM noise producing fibrous, streaked bark grain.
+Upload with [`map_to_images`] to get repeat-wrapping samplers.
+
+#### Bark
+
+Domain-warped FBM noise with an anisotropic Worley plate layer for rhytidome
+furrows, producing fibrous, streaked bark grain.
 
 ```rust
 use bevy_symbios_texture::bark::BarkConfig;
 
 let config = BarkConfig {
     seed: 42,
-    scale: 4.0,          // spatial frequency of the pattern
-    octaves: 6,          // FBM detail levels
-    warp_u: 0.15,        // lateral warp strength
-    warp_v: 0.55,        // vertical (fibre) warp strength
+    scale: 4.0,             // spatial frequency of the pattern
+    octaves: 6,             // FBM detail levels
+    warp_u: 0.15,           // lateral warp strength
+    warp_v: 0.55,           // vertical (fibre) warp strength
     color_light: [0.45, 0.28, 0.14],  // ridge colour, linear RGB
     color_dark:  [0.18, 0.10, 0.05],  // groove colour, linear RGB
     normal_strength: 3.0,
+    furrow_multiplier: 0.55, // blend weight of the Worley plate layer [0, 1]
+    furrow_scale_u: 2.0,     // horizontal cell frequency (higher = narrower plates)
+    furrow_scale_v: 0.25,    // vertical cell frequency (lower = longer plates)
+    furrow_shape: 0.4,       // plate height power (<1 widens plateau, sharpens cracks)
 };
 ```
 
-### Rock
+#### Rock
 
 Ridged multifractal noise for cracked, faceted stone.
 
@@ -124,13 +134,13 @@ let config = RockConfig {
     scale: 3.0,
     octaves: 8,
     attenuation: 2.0,    // ridge sharpness (higher = sharper)
-    color_light: [0.55, 0.52, 0.48],
+    color_light: [0.37, 0.42, 0.36],
     color_dark:  [0.22, 0.20, 0.18],
     normal_strength: 4.0,
 };
 ```
 
-### Ground
+#### Ground
 
 Blended dual-scale FBM for organic soil / dirt surfaces.
 
@@ -150,21 +160,120 @@ let config = GroundConfig {
 };
 ```
 
+### Foliage cards (alpha-masked)
+
+Foliage generators produce an RGBA8 texture where `albedo.alpha` encodes the
+silhouette (`0` = outside, `255` = inside).  Upload with [`map_to_images_card`]
+so the sampler does not tile and the alpha channel does not bleed at edges.
+
+#### Leaf
+
+A discrete leaf silhouette with procedural venation: midrib, secondary veins,
+Worley capillaries, and optional lobed margins.
+
+```rust
+use bevy_symbios_texture::leaf::LeafConfig;
+
+let config = LeafConfig {
+    seed: 0,
+    color_base: [0.12, 0.35, 0.08],  // interior colour, linear RGB
+    color_edge: [0.35, 0.28, 0.05],  // edge / autumn tinge
+    serration_strength: 0.12,         // tooth depth [0, ~0.35]
+    vein_angle: 2.5,                  // secondary vein acuteness
+    micro_detail: 0.3,                // Worley capillary blend weight
+    normal_strength: 3.0,
+    lobe_count: 0.0,                  // 0 = smooth; >0 = lobed margins
+    lobe_depth: 0.35,
+    lobe_sharpness: 1.0,
+    petiole_length: 0.12,             // fraction of V reserved for the stalk
+    petiole_width: 0.022,
+    midrib_width: 0.12,
+    vein_count: 6.0,
+    venule_strength: 0.50,
+};
+```
+
+`LeafSampler` can also be used directly for per-pixel evaluation without
+going through the full generator (e.g., inside a twig compositor):
+
+```rust
+use bevy_symbios_texture::leaf::{LeafConfig, LeafSampler};
+
+let sampler = LeafSampler::new(LeafConfig::default());
+if let Some(sample) = sampler.sample(0.5, 0.4) {
+    // sample.height, sample.color, sample.roughness
+}
+```
+
+#### Twig
+
+A composite foliage card: a tapered, organically curved stem carrying multiple
+leaf cards.  Supports two phyllotaxis modes:
+
+* **Monopodial** (`sympodial: false`) — opposite leaf pairs on a straight axis
+  with a terminal leaf at the apex.
+* **Sympodial** (`sympodial: true`) — alternate leaves on a zigzag axis.
+
+```rust
+use std::f64::consts::FRAC_PI_2;
+use bevy_symbios_texture::twig::TwigConfig;
+use bevy_symbios_texture::leaf::LeafConfig;
+
+let config = TwigConfig {
+    leaf: LeafConfig::default(),
+    stem_color: [0.25, 0.16, 0.07],
+    stem_half_width: 0.015,
+    leaf_pairs: 4,
+    leaf_angle: FRAC_PI_2 - 0.35,  // ~69° from stem axis
+    leaf_scale: 0.38,
+    stem_curve: 0.05,
+    sympodial: false,
+};
+```
+
+## Evolutionary parameter search (genetics)
+
+All config types implement `symbios_genetics::Genotype`, making them
+compatible with the evolutionary algorithms in the `symbios-genetics` crate
+(`SimpleGA`, `Nsga2`, `MapElites`).
+
+Each field is independently perturbed during mutation and drawn uniformly from
+one of two parents during crossover:
+
+```rust
+use symbios_genetics::Genotype;
+use bevy_symbios_texture::bark::BarkConfig;
+use rand::SeedableRng;
+
+let mut config = BarkConfig::default();
+let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+config.mutate(&mut rng, 0.3);  // perturb each field with 30 % probability
+
+let parent_b = BarkConfig { seed: 99, ..BarkConfig::default() };
+let child = config.crossover(&parent_b, &mut rng);
+```
+
+The `texture_viewer` example uses this to mutate any displayed panel when you
+click it.
+
 ## Architecture
 
 ```
 TextureGenerator (trait)
     │
-    ├── BarkGenerator   ─── ToroidalNoise (domain-warped FBM)
+    ├── BarkGenerator   ─── ToroidalNoise (domain-warped FBM + Worley plates)
     ├── RockGenerator   ─── ToroidalNoise (RidgedMulti)
-    └── GroundGenerator ─── ToroidalNoise × 2 (dual-scale FBM)
+    ├── GroundGenerator ─── ToroidalNoise × 2 (dual-scale FBM)
+    ├── LeafGenerator   ─── LeafSampler (silhouette + venation)
+    └── TwigGenerator   ─── LeafSampler × N (composite stem + leaves)
                                 │
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
                                 │
                          TextureMap { albedo, normal, roughness }
                                 │
-                        map_to_images() → GeneratedHandles { albedo, normal, roughness }
+                map_to_images()      → GeneratedHandles (repeat sampler)
+                map_to_images_card() → GeneratedHandles (clamp sampler)
 ```
 
 **Seamless tiling** is provided by [`ToroidalNoise`], which maps 2-D UV
@@ -192,7 +301,9 @@ gradients with wrap-around neighbours, so the normals are also seamless.
 cargo run --example texture_viewer
 ```
 
-Displays bark, rock, and ground albedo maps side-by-side in a window.
+Displays all five generators (Bark, Rock, Ground, Leaf, Twig) in two rows:
+albedo maps on top, normal maps below.  **Left-click any albedo panel** to
+apply a random mutation (rate = 0.3) and regenerate that texture.
 
 ## License
 

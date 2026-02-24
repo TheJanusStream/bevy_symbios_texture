@@ -7,7 +7,16 @@
 //!
 //! # Usage
 //! ```rust,ignore
+//! // Tileable surface textures (bark, rock, ground) — poll_texture_tasks
+//! // uploads them with map_to_images (repeat sampler).
 //! commands.spawn(PendingTexture::bark(BarkConfig::default(), 512, 512));
+//!
+//! // Foliage cards — async generation is supported, but poll_texture_tasks
+//! // uses map_to_images (repeat sampler).  For a clamp-to-edge sampler,
+//! // generate synchronously and call map_to_images_card yourself.
+//! commands.spawn(PendingTexture::leaf(LeafConfig::default(), 512, 512));
+//! commands.spawn(PendingTexture::twig(TwigConfig::default(), 512, 512));
+//!
 //! // Later, query for TextureReady to consume the handles.
 //! ```
 

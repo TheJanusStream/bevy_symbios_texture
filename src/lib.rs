@@ -1,12 +1,26 @@
-//! `bevy_symbios_texture` — procedural, tileable texture generation for Bevy.
+//! `bevy_symbios_texture` — procedural texture generation for Bevy.
+//!
+//! # Generators
+//!
+//! **Tileable surface textures** (bark, rock, ground): wrap seamlessly via
+//! toroidal 4-D noise mapping.  Upload with [`map_to_images`] to get
+//! repeat-wrapping samplers.
+//!
+//! **Foliage cards** (leaf, twig): produce alpha-masked silhouettes that must
+//! not tile.  Upload with [`map_to_images_card`] to get clamp-to-edge samplers.
 //!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
 //! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness).
-//! Call [`map_to_images`] to upload those buffers into [`bevy::asset::Assets<Image>`].
 //!
-//! Tileability is guaranteed by the [`ToroidalNoise`] wrapper, which maps 2-D
-//! UV coordinates to a 4-D torus so noise wraps at every edge with no seam.
+//! Seamless tiling for surface textures is guaranteed by the [`ToroidalNoise`]
+//! wrapper, which maps 2-D UV coordinates to a 4-D torus so noise wraps at
+//! every edge with no seam.
+//!
+//! # Genetics
+//! All config types implement `symbios_genetics::Genotype` (see [`genetics`]),
+//! making them compatible with evolutionary search algorithms such as
+//! `SimpleGA`, `Nsga2`, and `MapElites` from the `symbios-genetics` crate.
 
 pub mod async_gen;
 pub mod bark;
