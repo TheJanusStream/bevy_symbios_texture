@@ -103,6 +103,8 @@ impl Drop for PendingTexture {
 
 /// Shared constructor body: creates the channel + cancellation flag, spawns the
 /// task, and returns a `PendingTexture`.  The closure `f` is the generator call.
+/// Native Desktop: Spawn using our private, bounded Rayon pool.
+#[cfg(not(target_arch = "wasm32"))]
 fn spawn_task<F>(f: F, is_card: bool) -> PendingTexture
 where
     F: FnOnce() -> Result<TextureMap, TextureError> + Send + 'static,
@@ -110,12 +112,41 @@ where
     let cancelled = Arc::new(AtomicBool::new(false));
     let flag = Arc::clone(&cancelled);
     let (tx, rx) = mpsc::sync_channel(1);
+
     gen_pool().spawn(move || {
-        // Skip the entire computation if the entity was already despawned.
         if !flag.load(Ordering::Relaxed) {
             tx.send(f()).ok();
         }
     });
+
+    PendingTexture {
+        rx: std::sync::Mutex::new(rx),
+        cancelled,
+        is_card,
+    }
+}
+
+/// WASM Web: Fallback to Bevy's default AsyncComputeTaskPool.
+/// On WASM, this multiplexes onto the main thread (blocking UI, but compiling cleanly).
+#[cfg(target_arch = "wasm32")]
+fn spawn_task<F>(f: F, is_card: bool) -> PendingTexture
+where
+    F: FnOnce() -> Result<TextureMap, TextureError> + Send + 'static,
+{
+    use bevy::tasks::AsyncComputeTaskPool;
+
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&cancelled);
+    let (tx, rx) = mpsc::sync_channel(1);
+
+    AsyncComputeTaskPool::get()
+        .spawn(async move {
+            if !flag.load(Ordering::Relaxed) {
+                tx.send(f()).ok();
+            }
+        })
+        .detach(); // Detach the Bevy task; we track completion via the mpsc channel anyway
+
     PendingTexture {
         rx: std::sync::Mutex::new(rx),
         cancelled,
