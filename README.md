@@ -169,7 +169,8 @@ so the sampler does not tile and the alpha channel does not bleed at edges.
 #### Leaf
 
 A discrete leaf silhouette with procedural venation: midrib, secondary veins,
-Worley capillaries, and optional lobed margins.
+a Perlin venule (tertiary vein) network, Worley capillaries, and optional
+lobed margins.
 
 ```rust
 use bevy_symbios_texture::leaf::LeafConfig;
@@ -212,7 +213,8 @@ leaf cards.  Supports two phyllotaxis modes:
 
 * **Monopodial** (`sympodial: false`) — opposite leaf pairs on a straight axis
   with a terminal leaf at the apex.
-* **Sympodial** (`sympodial: true`) — alternate leaves on a zigzag axis.
+* **Sympodial** (`sympodial: true`) — alternate leaves on a zigzag axis,
+  with a terminal leaf at the apex.
 
 ```rust
 use std::f64::consts::FRAC_PI_2;
@@ -292,8 +294,11 @@ resolve to the same 4-D point, guaranteeing zero-seam tiling.
 **Normal maps** are derived from the height field via central-difference
 gradients with wrap-around neighbours, so the normals are also seamless.
 
-**Colour encoding** uses a 256-entry sRGB lookup table (built once via
+**Colour encoding** uses a 4096-entry sRGB lookup table (built once via
 `OnceLock`) to avoid repeated `f32::powf` calls during rasterisation.
+A 256-entry table would be insufficient because the sRGB curve is steep
+near zero; 4096 bins keep the maximum quantisation error well below one
+count in u8.
 
 ## Running the viewer example
 
