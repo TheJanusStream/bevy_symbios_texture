@@ -117,6 +117,10 @@ impl Genotype for BarkConfig {
         self.color_light = mutate_color3(self.color_light, rng, rate, 0.07);
         self.color_dark = mutate_color3(self.color_dark, rng, rate, 0.07);
         self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 8.0);
+        self.furrow_multiplier = mutate_f64(self.furrow_multiplier, rng, rate, 0.2, 0.0, 1.0);
+        self.furrow_scale_u = mutate_f64(self.furrow_scale_u, rng, rate, 0.5, 0.5, 6.0);
+        self.furrow_scale_v = mutate_f64(self.furrow_scale_v, rng, rate, 0.1, 0.05, 1.0);
+        self.furrow_shape = mutate_f64(self.furrow_shape, rng, rate, 0.15, 0.1, 2.0);
     }
 
     fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
@@ -152,6 +156,26 @@ impl Genotype for BarkConfig {
                 self.normal_strength
             } else {
                 other.normal_strength
+            },
+            furrow_multiplier: if rng.random::<bool>() {
+                self.furrow_multiplier
+            } else {
+                other.furrow_multiplier
+            },
+            furrow_scale_u: if rng.random::<bool>() {
+                self.furrow_scale_u
+            } else {
+                other.furrow_scale_u
+            },
+            furrow_scale_v: if rng.random::<bool>() {
+                self.furrow_scale_v
+            } else {
+                other.furrow_scale_v
+            },
+            furrow_shape: if rng.random::<bool>() {
+                self.furrow_shape
+            } else {
+                other.furrow_shape
             },
         }
     }

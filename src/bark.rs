@@ -11,7 +11,8 @@
 
 use std::f64::consts::TAU;
 
-use noise::{Fbm, MultiFractal, Perlin};
+use noise::core::worley::ReturnType;
+use noise::{Fbm, MultiFractal, NoiseFn, Perlin, Worley};
 
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
@@ -37,6 +38,16 @@ pub struct BarkConfig {
     pub color_dark: [f32; 3],
     /// Normal map strength.
     pub normal_strength: f32,
+    /// Blend weight of the rhytidome furrow layer \[0, 1\].  0 = pure FBM fibre,
+    /// 1 = pure Worley plates.
+    pub furrow_multiplier: f64,
+    /// Horizontal frequency of the Worley cells (higher = narrower plates).
+    pub furrow_scale_u: f64,
+    /// Vertical frequency of the Worley cells (lower = longer vertical plates).
+    pub furrow_scale_v: f64,
+    /// Power applied to the normalised plate height.  Values < 1 fatten the
+    /// plates and sharpen the V-shaped cracks between them.
+    pub furrow_shape: f64,
 }
 
 impl Default for BarkConfig {
@@ -50,6 +61,10 @@ impl Default for BarkConfig {
             color_light: [0.45, 0.28, 0.14],
             color_dark: [0.18, 0.10, 0.05],
             normal_strength: 3.0,
+            furrow_multiplier: 0.55,
+            furrow_scale_u: 2.0,
+            furrow_scale_v: 0.25,
+            furrow_shape: 0.4,
         }
     }
 }
@@ -84,6 +99,11 @@ impl TextureGenerator for BarkGenerator {
         let warp_v_noise = ToroidalNoise::new(fbm_warp_v, c.scale);
         let base_noise = ToroidalNoise::new(fbm_base, c.scale);
 
+        // Worley noise for rhytidome plates — frequency = 1.0 because we bake
+        // the anisotropic scaling into the torus lookup tables below.
+        let worley = Worley::new(c.seed.wrapping_add(300))
+            .set_return_type(ReturnType::Distance);
+
         let w = width as usize;
         let h = height as usize;
         let n = w * h;
@@ -105,6 +125,24 @@ impl TextureGenerator for BarkGenerator {
             .map(|y| (TAU * y as f64 / h as f64).sin() * freq)
             .collect();
 
+        // Anisotropic torus tables for the Worley furrow layer.
+        // High U frequency → narrow horizontal spacing (many columns of plates).
+        // Low V frequency  → wide vertical spacing (long plates, deep fissures).
+        let f_freq_u = c.scale * c.furrow_scale_u;
+        let f_freq_v = c.scale * c.furrow_scale_v;
+        let f_col_cos: Vec<f64> = (0..w)
+            .map(|x| (TAU * x as f64 / w as f64).cos() * f_freq_u)
+            .collect();
+        let f_col_sin: Vec<f64> = (0..w)
+            .map(|x| (TAU * x as f64 / w as f64).sin() * f_freq_u)
+            .collect();
+        let f_row_cos: Vec<f64> = (0..h)
+            .map(|y| (TAU * y as f64 / h as f64).cos() * f_freq_v)
+            .collect();
+        let f_row_sin: Vec<f64> = (0..h)
+            .map(|y| (TAU * y as f64 / h as f64).sin() * f_freq_v)
+            .collect();
+
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
@@ -113,6 +151,9 @@ impl TextureGenerator for BarkGenerator {
             let nz = row_cos[y];
             let nw = row_sin[y];
             let v = y as f64 / h as f64;
+
+            let f_nz = f_row_cos[y];
+            let f_nw = f_row_sin[y];
 
             for x in 0..w {
                 let nx = col_cos[x];
@@ -127,8 +168,23 @@ impl TextureGenerator for BarkGenerator {
                 let raw = base_noise.get(u + du, v + dv);
                 let t = normalize(raw); // [0, 1]
 
+                // --- Worley rhytidome plates ---
+                // Sample anisotropic Worley on a 4D torus: U-axis uses high
+                // frequency (narrow plates), V-axis uses low frequency (tall plates).
+                let f_nx = f_col_cos[x];
+                let f_ny = f_col_sin[x];
+                let furrow_raw = worley.get([f_nx, f_ny, f_nz, f_nw]);
+                // Invert: boundaries (furrow_raw ≈ 1) → 0 (deep crack);
+                //         centres  (furrow_raw ≈ -1) → 1 (raised plate).
+                let furrow_norm = (0.5 - furrow_raw * 0.5).clamp(0.0, 1.0);
+                // powf < 1 widens the plateau and keeps cracks narrow and sharp.
+                let plate_height = furrow_norm.powf(c.furrow_shape);
+
+                // Blend fibrous FBM micro-detail with macro rhytidome plates.
+                let t_final = t * (1.0 - c.furrow_multiplier) + plate_height * c.furrow_multiplier;
+
                 let idx = y * w + x;
-                heights[idx] = t;
+                heights[idx] = t_final;
 
                 // Colour: lerp between dark and light by height value.
                 let r = lerp(c.color_dark[0], c.color_light[0], t as f32);
