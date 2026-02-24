@@ -363,24 +363,31 @@ fn terminal_v(config: &TwigConfig) -> f64 {
 ///
 /// Combines a slow organic Perlin wiggle with an optional sympodial sine
 /// zigzag whose amplitude grows from zero at the tip to maximum at the base.
+/// Both components are anchored so that the stem base (`pv = 1`) is always
+/// exactly centred at `u = 0.5`.
 fn stem_center_u(pv: f64, config: &TwigConfig, perlin: &Perlin) -> f64 {
     // Organic curvature: slow single-frequency Perlin wiggle.
-    let organic = perlin.get([pv * STEM_CURVE_FREQ, STEM_PERLIN_Y]) * config.stem_curve;
+    // Subtract the value at pv=1 so the base attachment is always at u=0.5.
+    let organic = (perlin.get([pv * STEM_CURVE_FREQ, STEM_PERLIN_Y])
+        - perlin.get([STEM_CURVE_FREQ, STEM_PERLIN_Y]))
+        * config.stem_curve;
 
     // Sympodial zigzag: sine wave, amplitude = 0 at tip, grows toward base.
     // Phase is computed over the lateral-leaf span [lat_start, 0.88] so that
     // the sine extrema align with the attach_v positions from
     // sympodial_attachments (which place leaves at normalized = (2k+1)/(2n)
     // within that same span).
+    // Subtracting the base value anchors the zigzag to zero at pv=1.
     let zigzag = if config.sympodial {
         let lat_start = terminal_v(config) + 0.05;
         let lat_span = 0.88 - lat_start;
-        let phase = if lat_span > 0.0 {
-            (pv - lat_start) / lat_span * config.leaf_pairs as f64 * PI
+        if lat_span > 0.0 {
+            let phase = (pv - lat_start) / lat_span * config.leaf_pairs as f64 * PI;
+            let phase_base = (1.0 - lat_start) / lat_span * config.leaf_pairs as f64 * PI;
+            (phase.sin() * pv - phase_base.sin()) * config.stem_curve * SYMPODIAL_ZZ_SCALE
         } else {
             0.0
-        };
-        phase.sin() * config.stem_curve * SYMPODIAL_ZZ_SCALE * pv
+        }
     } else {
         0.0
     };
@@ -610,6 +617,26 @@ mod tests {
             (ru - 0.5).abs(),
             (lu - 0.5).abs(),
         );
+    }
+
+    #[test]
+    fn stem_base_is_centered() {
+        // stem_center_u(1.0) must equal 0.5 regardless of seed / sympodial mode.
+        for sympodial in [false, true] {
+            for seed in [0u32, 1, 42] {
+                let config = TwigConfig {
+                    sympodial,
+                    leaf: crate::leaf::LeafConfig { seed, ..Default::default() },
+                    ..TwigConfig::default()
+                };
+                let perlin = make_stem_perlin(&config);
+                let u = stem_center_u(1.0, &config, &perlin);
+                assert!(
+                    (u - 0.5).abs() < 1e-12,
+                    "stem base should be at u=0.5 (sympodial={sympodial}, seed={seed}), got {u}"
+                );
+            }
+        }
     }
 
     #[test]
