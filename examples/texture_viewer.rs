@@ -25,12 +25,16 @@ const TEX_SIZE: u32 = 512;
 const N_PANELS: usize = 5;
 const SPACING: f32 = TEX_SIZE as f32 + 20.0;
 
+/// Y-centre of the albedo row (upper) and normal-map row (lower).
+const ALBEDO_Y: f32 = TEX_SIZE as f32 * 0.5 + 20.0;
+const NORMAL_Y: f32 = -(TEX_SIZE as f32 * 0.5 + 20.0);
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "bevy_symbios_texture — click to mutate".into(),
-                resolution: ((SPACING * N_PANELS as f32 + 40.0) as u32, TEX_SIZE + 80).into(),
+                resolution: ((SPACING * N_PANELS as f32 + 40.0) as u32, TEX_SIZE * 2 + 120).into(),
                 ..default()
             }),
             ..default()
@@ -94,6 +98,10 @@ impl PanelConfig {
 #[derive(Component, Clone, Copy)]
 struct TextureSlot(usize);
 
+/// Marker for the normal-map sprite in a panel slot (not clickable).
+#[derive(Component)]
+struct NormalPanel;
+
 fn slot_x(slot: usize) -> f32 {
     (slot as f32 - (N_PANELS as f32 - 1.0) * 0.5) * SPACING
 }
@@ -132,6 +140,7 @@ fn show_ready_textures(
         let x = slot_x(slot.0);
         let label = config.label();
 
+        // Albedo panel (top row) — this is the clickable panel.
         commands
             .spawn((
                 Sprite {
@@ -139,13 +148,36 @@ fn show_ready_textures(
                     custom_size: Some(Vec2::splat(TEX_SIZE as f32)),
                     ..default()
                 },
-                Transform::from_translation(Vec3::new(x, 0.0, 0.0)),
+                Transform::from_translation(Vec3::new(x, ALBEDO_Y, 0.0)),
                 slot,
                 config.clone(),
             ))
             .with_children(|parent| {
                 parent.spawn((
                     Text2d::new(label),
+                    Transform::from_translation(Vec3::new(
+                        0.0,
+                        -(TEX_SIZE as f32 * 0.5 + 18.0),
+                        0.0,
+                    )),
+                ));
+            });
+
+        // Normal-map panel (bottom row) — display only.
+        commands
+            .spawn((
+                Sprite {
+                    image: ready_tex.0.normal.clone(),
+                    custom_size: Some(Vec2::splat(TEX_SIZE as f32)),
+                    ..default()
+                },
+                Transform::from_translation(Vec3::new(x, NORMAL_Y, 0.0)),
+                NormalPanel,
+                slot,
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Text2d::new(format!("{label} (normal)")),
                     Transform::from_translation(Vec3::new(
                         0.0,
                         -(TEX_SIZE as f32 * 0.5 + 18.0),
@@ -165,6 +197,7 @@ fn handle_click(
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
     panels: Query<(Entity, &Transform, &PanelConfig, &TextureSlot), With<Sprite>>,
+    normal_panels: Query<(Entity, &TextureSlot), With<NormalPanel>>,
     mut commands: Commands,
     mut rng: Local<Option<StdRng>>,
 ) {
@@ -195,6 +228,12 @@ fn handle_click(
             let pending = new_config.spawn_pending(TEX_SIZE, TEX_SIZE);
             // despawn() is recursive by default in Bevy 0.15+, removing the label child too.
             commands.entity(entity).despawn();
+            for (normal_entity, &normal_slot) in &normal_panels {
+                if normal_slot.0 == slot.0 {
+                    commands.entity(normal_entity).despawn();
+                    break;
+                }
+            }
             commands.spawn((pending, new_config, slot));
             break;
         }
