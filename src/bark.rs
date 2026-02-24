@@ -3,7 +3,7 @@
 //! The algorithm:
 //!  1. Precompute toroidal sin/cos lookup tables (one entry per column, one per row).
 //!  2. For each pixel, sample two FBM warp layers inline to produce offsets (du, dv).
-//!  3. Sample a third FBM layer at the warped UV coordinates for the final value.
+//!  3. Sample the precomputed base FBM grid via bilinear interpolation at the warped UV coordinates for the final value.
 //!  4. Derive colour, roughness and a height field from the result.
 //!
 //! The warp layers are computed inline (no intermediate grids).  The base FBM

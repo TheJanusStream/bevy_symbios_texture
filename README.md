@@ -226,7 +226,7 @@ let config = TwigConfig {
     stem_color: [0.25, 0.16, 0.07],
     stem_half_width: 0.015,
     leaf_pairs: 4,
-    leaf_angle: FRAC_PI_2 - 0.35,  // ~69° from stem axis
+    leaf_angle: FRAC_PI_2 - 0.35,  // ~70° from stem axis
     leaf_scale: 0.38,
     stem_curve: 0.05,
     sympodial: false,
@@ -292,7 +292,10 @@ Because `cos(0) = cos(2π)` and `sin(0) = sin(2π)`, `u=0` and `u=1` always
 resolve to the same 4-D point, guaranteeing zero-seam tiling.
 
 **Normal maps** are derived from the height field via central-difference
-gradients with wrap-around neighbours, so the normals are also seamless.
+gradients.  For the tileable surface textures (Bark, Rock, Ground) the
+neighbours wrap toroidally, so the normals are also seamless.  For foliage
+cards (Leaf, Twig) the boundary uses clamp-to-edge so normals do not bleed
+across the transparent silhouette border.
 
 **Colour encoding** uses a 4096-entry sRGB lookup table (built once via
 `OnceLock`) to avoid repeated `f32::powf` calls during rasterisation.

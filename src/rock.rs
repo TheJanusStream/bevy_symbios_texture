@@ -75,7 +75,7 @@ impl TextureGenerator for RockGenerator {
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
 
-        for (i, &height) in heights.iter().enumerate().take(n) {
+        for (i, &height) in heights.iter().enumerate() {
             let t = normalize(height) as f32;
 
             let r = lerp(c.color_dark[0], c.color_light[0], t);
