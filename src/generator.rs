@@ -159,6 +159,73 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
     }
 }
 
+/// Recursively downsamples a base RGBA8 image to generate all mipmap levels.
+///
+/// Appends each successive level (half width, half height) directly onto
+/// `data` using a 2×2 box filter.  Non-power-of-two dimensions are handled
+/// by clamping the source 2×2 block to the actual image boundary.
+///
+/// Returns the expanded buffer and the total number of mip levels
+/// (including level 0).
+fn generate_mipmaps_rgba(mut data: Vec<u8>, base_width: u32, base_height: u32) -> (Vec<u8>, u32) {
+    let mut mip_level_count = 1u32;
+    let mut current_width = base_width as usize;
+    let mut current_height = base_height as usize;
+    let mut prev_offset = 0usize;
+
+    while current_width > 1 || current_height > 1 {
+        let next_width = current_width.max(2) / 2;
+        let next_height = current_height.max(2) / 2;
+        let next_offset = data.len();
+
+        data.resize(next_offset + next_width * next_height * 4, 0);
+
+        for y in 0..next_height {
+            for x in 0..next_width {
+                let dst_idx = next_offset + (y * next_width + x) * 4;
+
+                let sx = x * 2;
+                let sy = y * 2;
+
+                let mut r = 0u32;
+                let mut g = 0u32;
+                let mut b = 0u32;
+                let mut a = 0u32;
+                let mut samples = 0u32;
+
+                for dy in 0..2usize {
+                    if sy + dy >= current_height {
+                        continue;
+                    }
+                    for dx in 0..2usize {
+                        if sx + dx >= current_width {
+                            continue;
+                        }
+                        let src_idx = prev_offset + ((sy + dy) * current_width + (sx + dx)) * 4;
+                        r += data[src_idx] as u32;
+                        g += data[src_idx + 1] as u32;
+                        b += data[src_idx + 2] as u32;
+                        a += data[src_idx + 3] as u32;
+                        samples += 1;
+                    }
+                }
+
+                data[dst_idx] = (r / samples) as u8;
+                data[dst_idx + 1] = (g / samples) as u8;
+                data[dst_idx + 2] = (b / samples) as u8;
+                data[dst_idx + 3] = (a / samples) as u8;
+            }
+        }
+
+        prev_offset = next_offset;
+        current_width = next_width;
+        current_height = next_height;
+        mip_level_count += 1;
+    }
+
+    (data, mip_level_count)
+}
+
 fn make_image(
     data: Vec<u8>,
     width: u32,
@@ -166,6 +233,11 @@ fn make_image(
     format: TextureFormat,
     address_mode: ImageAddressMode,
 ) -> Image {
+    let base_size = (width as usize) * (height as usize) * 4;
+    let (mip_data, mip_level_count) = generate_mipmaps_rgba(data, width, height);
+
+    // Image::new validates data.len() == width * height * bytes_per_pixel,
+    // so we construct with the level-0 slice, then overwrite with the full chain.
     let mut image = Image::new(
         Extent3d {
             width,
@@ -173,13 +245,20 @@ fn make_image(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        data,
+        mip_data[..base_size].to_vec(),
         format,
         RenderAssetUsages::default(),
     );
+    image.texture_descriptor.mip_level_count = mip_level_count;
+    image.data = Some(mip_data);
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: address_mode,
         address_mode_v: address_mode,
+        // wgpu requires all filter modes to be Linear when anisotropy_clamp > 1.
+        mag_filter: bevy::image::ImageFilterMode::Linear,
+        min_filter: bevy::image::ImageFilterMode::Linear,
+        mipmap_filter: bevy::image::ImageFilterMode::Linear,
+        anisotropy_clamp: 16,
         ..Default::default()
     });
     image
