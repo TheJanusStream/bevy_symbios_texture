@@ -183,8 +183,14 @@ impl LeafSampler {
 
         // Remap V into blade space [0, 1] so that the petiole region does not
         // compress the leaf blade geometry.
+        // Guard: if petiole_length >= 1.0 the divisor would be <= 0 (NaN / inf).
+        // Semantically there is no blade, so return None.
         let v_blade = if c.petiole_length > 0.0 {
-            (v - c.petiole_length) / (1.0 - c.petiole_length)
+            let denom = 1.0 - c.petiole_length;
+            if denom <= 0.0 {
+                return None;
+            }
+            (v - c.petiole_length) / denom
         } else {
             v
         };
@@ -344,9 +350,11 @@ impl TextureGenerator for LeafGenerator {
         let mut roughness = vec![0u8; n * 4];
 
         for y in 0..h {
-            let v = y as f64 / h as f64;
+            // Pixel-centre sampling: covers (0.5/h … (h-0.5)/h) symmetrically.
+            // Correct for clamp-to-edge cards — tiling generators use x/w instead.
+            let v = (y as f64 + 0.5) / h as f64;
             for x in 0..w {
-                let u = x as f64 / w as f64;
+                let u = (x as f64 + 0.5) / w as f64;
                 let idx = y * w + x;
                 let ai = idx * 4;
 

@@ -338,12 +338,8 @@ fn make_image(
     address_mode: ImageAddressMode,
     mipmap_mode: MipmapMode,
 ) -> Image {
-    let base_size = (width as usize) * (height as usize) * 4;
-    let (mip_data, mip_level_count) = generate_mipmaps(data, width, height, mipmap_mode);
-
-    // Image::new validates data.len() == width * height * bytes_per_pixel,
-    // so we construct with a zeroed level-0 dummy (avoids copying mip_data),
-    // then overwrite image.data with the full mip chain.
+    // Pass base-level data directly — its length equals width * height * 4, which
+    // is exactly what Image::new expects.  No dummy zeroed buffer needed.
     let mut image = Image::new(
         Extent3d {
             width,
@@ -351,10 +347,12 @@ fn make_image(
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        vec![0u8; base_size],
+        data,
         format,
         RenderAssetUsages::default(),
     );
+    let base_data = image.data.take().unwrap();
+    let (mip_data, mip_level_count) = generate_mipmaps(base_data, width, height, mipmap_mode);
     image.texture_descriptor.mip_level_count = mip_level_count;
     image.data = Some(mip_data);
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {

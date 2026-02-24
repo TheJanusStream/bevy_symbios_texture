@@ -272,14 +272,14 @@ impl TextureGenerator for TwigGenerator {
         let mut roughness = vec![0u8; n * 4];
 
         for y in 0..h {
-            let pv = y as f64 / h as f64;
+            let pv = (y as f64 + 0.5) / h as f64;
 
             // Stem centerline and tapered half-width for this scanline.
             let s_center = stem_center_u(pv, c, &stem_perlin);
             let s_hw = stem_half_width_at(pv, c.stem_half_width);
 
             for x in 0..w {
-                let pu = x as f64 / w as f64;
+                let pu = (x as f64 + 0.5) / w as f64;
                 let idx = y * w + x;
                 let ai = idx * 4;
 

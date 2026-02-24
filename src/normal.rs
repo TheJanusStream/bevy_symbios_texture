@@ -72,9 +72,12 @@ pub fn height_to_normal(
             // and a central difference in the interior (x_dist 2).
             // NOTE: under Wrap, xm may be larger than xp (e.g. xm=w-1, xp=1),
             // so we must not compute `xp - xm` directly — that would underflow.
+            // NOTE: under Clamp with w == 1, xm == xp == 0, so the difference
+            // would be 0.  Guard with .max(1) — the numerator (right - left) is
+            // also 0 in that case (same pixel both sides), so dx == 0 (flat normal).
             let (x_dist, y_dist) = match boundary {
                 BoundaryMode::Wrap => (2.0f64, 2.0f64),
-                BoundaryMode::Clamp => ((xp - xm) as f64, (yp - ym) as f64),
+                BoundaryMode::Clamp => ((xp - xm).max(1) as f64, (yp - ym).max(1) as f64),
             };
             let dx = (right - left) * s * w as f64 / x_dist;
             let dy = (below - above) * s * h as f64 / y_dist;
