@@ -277,27 +277,11 @@ impl TextureGenerator for TwigGenerator {
                 let idx = y * w + x;
                 let ai = idx * 4;
 
-                // --- Stem SDF ---
                 let dist_to_stem = (pu - s_center).abs();
-                if s_hw > 1e-9 && dist_to_stem < s_hw {
-                    // Bright ridge at the stem centre.
-                    let t = 1.0 - (dist_to_stem / s_hw) as f32;
-                    heights[idx] = t as f64 * 0.6;
 
-                    albedo[ai] = linear_to_srgb(lerp(c.stem_color[0] * 0.55, c.stem_color[0], t));
-                    albedo[ai + 1] =
-                        linear_to_srgb(lerp(c.stem_color[1] * 0.55, c.stem_color[1], t));
-                    albedo[ai + 2] =
-                        linear_to_srgb(lerp(c.stem_color[2] * 0.55, c.stem_color[2], t));
-                    albedo[ai + 3] = 255;
-                    roughness[ai] = 255;
-                    roughness[ai + 1] = (0.78_f32 * 255.0) as u8;
-                    roughness[ai + 2] = 0;
-                    roughness[ai + 3] = 255;
-                    continue;
-                }
-
-                // --- Leaf composite ---
+                // --- Leaf composite (evaluated first: leaves take priority over stem) ---
+                // In a real twig the leaf blade overlaps and obscures the stem
+                // at the attachment point; evaluating leaves first models that correctly.
                 let mut hit = false;
                 for att in &attachments {
                     let (lu, lv) = pixel_to_leaf_uv(pu, pv, att);
@@ -319,7 +303,27 @@ impl TextureGenerator for TwigGenerator {
                     }
                 }
 
-                if !hit {
+                if hit {
+                    continue;
+                }
+
+                // --- Stem SDF (lower priority than leaves) ---
+                if s_hw > 1e-9 && dist_to_stem < s_hw {
+                    // Bright ridge at the stem centre.
+                    let t = 1.0 - (dist_to_stem / s_hw) as f32;
+                    heights[idx] = t as f64 * 0.6;
+
+                    albedo[ai] = linear_to_srgb(lerp(c.stem_color[0] * 0.55, c.stem_color[0], t));
+                    albedo[ai + 1] =
+                        linear_to_srgb(lerp(c.stem_color[1] * 0.55, c.stem_color[1], t));
+                    albedo[ai + 2] =
+                        linear_to_srgb(lerp(c.stem_color[2] * 0.55, c.stem_color[2], t));
+                    albedo[ai + 3] = 255;
+                    roughness[ai] = 255;
+                    roughness[ai + 1] = (0.78_f32 * 255.0) as u8;
+                    roughness[ai + 2] = 0;
+                    roughness[ai + 3] = 255;
+                } else {
                     // Write edge color into RGB to prevent dark halos from
                     // bilinear filtering at silhouette boundaries.
                     let ec = &c.leaf.color_edge;

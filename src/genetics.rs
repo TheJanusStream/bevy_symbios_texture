@@ -66,7 +66,7 @@ fn mutate_f32<R: Rng>(
 fn mutate_usize<R: Rng>(val: usize, rng: &mut R, rate: f32, min: usize, max: usize) -> usize {
     if rng.random::<f32>() < rate {
         if rng.random::<bool>() {
-            (val + 1).min(max)
+            val.saturating_add(1).min(max)
         } else {
             val.saturating_sub(1).max(min)
         }

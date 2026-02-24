@@ -187,17 +187,21 @@ fn make_image(
 
 /// Convert a linear-light `f32` in `[0, 1]` to an sRGB-encoded `u8`.
 ///
-/// Uses a 256-entry lookup table (built once via [`OnceLock`]) to avoid
+/// Uses a 4096-entry lookup table (built once via [`OnceLock`]) to avoid
 /// calling `f32::powf` millions of times per texture.  The input is quantised
-/// to the nearest 1/255 step before the lookup; the resulting error is less
-/// than one count in the output, which is indistinguishable after u8
-/// quantisation.
+/// to the nearest 1/4095 step before the lookup; the step is ~0.000244,
+/// which keeps the maximum output error well below one count in u8.
+///
+/// A 256-entry table would be insufficient: the sRGB curve is steep near
+/// zero and the first non-zero bin (linear ≈ 1/255) maps to sRGB ≈ 13,
+/// making output values 1–12 unreachable.  4096 bins avoid that gap.
 #[inline]
 pub(crate) fn linear_to_srgb(linear: f32) -> u8 {
-    static LUT: OnceLock<[u8; 256]> = OnceLock::new();
+    const N: usize = 4096;
+    static LUT: OnceLock<[u8; N]> = OnceLock::new();
     let lut = LUT.get_or_init(|| {
         std::array::from_fn(|i| {
-            let c = i as f32 / 255.0_f32;
+            let c = i as f32 / (N - 1) as f32;
             let encoded = if c <= 0.003_130_8 {
                 c * 12.92
             } else {
@@ -206,5 +210,5 @@ pub(crate) fn linear_to_srgb(linear: f32) -> u8 {
             (encoded * 255.0).round() as u8
         })
     });
-    lut[(linear.clamp(0.0, 1.0) * 255.0).round() as usize]
+    lut[(linear.clamp(0.0, 1.0) * (N - 1) as f32).round() as usize]
 }

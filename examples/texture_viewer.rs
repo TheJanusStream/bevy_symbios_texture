@@ -211,7 +211,13 @@ fn handle_click(
         return;
     }
 
-    let rng = rng.get_or_insert_with(|| StdRng::seed_from_u64(0xdead_beef_cafe));
+    let rng = rng.get_or_insert_with(|| {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        StdRng::seed_from_u64(seed)
+    });
 
     let Ok(window) = windows.single() else { return };
     let Some(cursor_pos) = window.cursor_position() else {
