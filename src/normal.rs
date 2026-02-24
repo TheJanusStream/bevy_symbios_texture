@@ -25,9 +25,10 @@ pub enum BoundaryMode {
 ///
 /// `strength` scales the gradient — larger values produce more pronounced
 /// normals.  The gradient is divided by the pixel spacing in UV space
-/// (`2 / width` and `2 / height` for central differences), so the output is
-/// resolution-independent: the same `strength` value produces identical
-/// surface steepness at any resolution.
+/// (`2 / width` and `2 / height` for central differences) and normalised by a
+/// baseline of 256 texels, so the output is resolution-independent: the same
+/// `strength` value produces identical surface steepness at any resolution.
+/// Config values (`3.0`, `4.0`, …) are calibrated to that 256-texel baseline.
 ///
 /// `boundary` controls how neighbours are fetched at the texture edges.  Use
 /// [`BoundaryMode::Wrap`] for tileable textures and [`BoundaryMode::Clamp`]
@@ -44,7 +45,11 @@ pub fn height_to_normal(
     }
     let w = width as usize;
     let h = height as usize;
-    let s = strength as f64;
+    // Divide by 256 so that config strength values (e.g. 3.0, 4.0) stay in the
+    // intended visual range at any resolution.  Without this, `s * w` at a
+    // 512×512 texture would inflate gradients by ~256×, crushing the Z-component
+    // of the normal toward zero (the "Z-crushing" bug).
+    let s = (strength as f64) / 256.0;
 
     let mut out = vec![0u8; w * h * 4];
 
