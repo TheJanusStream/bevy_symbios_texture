@@ -61,14 +61,18 @@ use bevy::{
 
 use crate::{
     bark::{BarkConfig, BarkGenerator},
+    brick::{BrickConfig, BrickGenerator},
     generator::{
         GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images,
         map_to_images_card,
     },
     ground::{GroundConfig, GroundGenerator},
     leaf::{LeafConfig, LeafGenerator},
+    plank::{PlankConfig, PlankGenerator},
     rock::{RockConfig, RockGenerator},
+    shingle::{ShingleConfig, ShingleGenerator},
     twig::{TwigConfig, TwigGenerator},
+    window::{WindowConfig, WindowGenerator},
 };
 
 /// Spawned onto an entity to request background texture generation.
@@ -191,6 +195,34 @@ impl PendingTexture {
     pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
         let generator = TwigGenerator::new(config);
         spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a brick-wall texture generation thread at `width × height` texels.
+    pub fn brick(config: BrickConfig, width: u32, height: u32) -> Self {
+        let generator = BrickGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a window texture generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// giving a clamp-to-edge sampler suitable for foliage cards.
+    pub fn window(config: WindowConfig, width: u32, height: u32) -> Self {
+        let generator = WindowGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a wood-plank / siding texture generation thread at `width × height` texels.
+    pub fn plank(config: PlankConfig, width: u32, height: u32) -> Self {
+        let generator = PlankGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a roof-shingle texture generation thread at `width × height` texels.
+    pub fn shingle(config: ShingleConfig, width: u32, height: u32) -> Self {
+        let generator = ShingleGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
     }
 }
 

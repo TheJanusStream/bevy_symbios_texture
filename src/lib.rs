@@ -24,14 +24,18 @@
 
 pub mod async_gen;
 pub mod bark;
+pub mod brick;
 pub mod generator;
 pub mod genetics;
 pub mod ground;
 pub mod leaf;
 pub mod noise;
 pub mod normal;
+pub mod plank;
 pub mod rock;
+pub mod shingle;
 pub mod twig;
+pub mod window;
 
 pub use generator::{
     GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images, map_to_images_card,

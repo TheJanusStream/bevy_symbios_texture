@@ -20,7 +20,9 @@ use rand::Rng;
 use symbios_genetics::Genotype;
 
 use crate::{
-    bark::BarkConfig, ground::GroundConfig, leaf::LeafConfig, rock::RockConfig, twig::TwigConfig,
+    bark::BarkConfig, brick::BrickConfig, ground::GroundConfig, leaf::LeafConfig,
+    plank::PlankConfig, rock::RockConfig, shingle::ShingleConfig, twig::TwigConfig,
+    window::WindowConfig,
 };
 
 // --- shared helpers ---------------------------------------------------------
@@ -428,6 +430,266 @@ impl Genotype for TwigConfig {
                 self.sympodial
             } else {
                 other.sympodial
+            },
+        }
+    }
+}
+
+// --- BrickConfig ------------------------------------------------------------
+
+impl Genotype for BrickConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 12.0);
+        self.row_offset = mutate_f64(self.row_offset, rng, rate, 0.1, 0.0, 1.0);
+        self.aspect_ratio = mutate_f64(self.aspect_ratio, rng, rate, 0.3, 1.0, 4.0);
+        self.mortar_size = mutate_f64(self.mortar_size, rng, rate, 0.03, 0.01, 0.35);
+        self.bevel = mutate_f64(self.bevel, rng, rate, 0.2, 0.0, 1.0);
+        self.cell_variance = mutate_f64(self.cell_variance, rng, rate, 0.1, 0.0, 0.8);
+        self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
+        self.color_brick = mutate_color3(self.color_brick, rng, rate, 0.07);
+        self.color_mortar = mutate_color3(self.color_mortar, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 8.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() {
+                self.seed
+            } else {
+                other.seed
+            },
+            scale: if rng.random::<bool>() {
+                self.scale
+            } else {
+                other.scale
+            },
+            row_offset: if rng.random::<bool>() {
+                self.row_offset
+            } else {
+                other.row_offset
+            },
+            aspect_ratio: if rng.random::<bool>() {
+                self.aspect_ratio
+            } else {
+                other.aspect_ratio
+            },
+            mortar_size: if rng.random::<bool>() {
+                self.mortar_size
+            } else {
+                other.mortar_size
+            },
+            bevel: if rng.random::<bool>() {
+                self.bevel
+            } else {
+                other.bevel
+            },
+            cell_variance: if rng.random::<bool>() {
+                self.cell_variance
+            } else {
+                other.cell_variance
+            },
+            roughness: if rng.random::<bool>() {
+                self.roughness
+            } else {
+                other.roughness
+            },
+            color_brick: crossover_color3(self.color_brick, other.color_brick, rng),
+            color_mortar: crossover_color3(self.color_mortar, other.color_mortar, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- WindowConfig -----------------------------------------------------------
+
+impl Genotype for WindowConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.frame_width = mutate_f64(self.frame_width, rng, rate, 0.02, 0.02, 0.4);
+        self.panes_x = mutate_usize(self.panes_x, rng, rate, 1, 6);
+        self.panes_y = mutate_usize(self.panes_y, rng, rate, 1, 8);
+        self.mullion_thickness = mutate_f64(self.mullion_thickness, rng, rate, 0.005, 0.005, 0.15);
+        self.corner_radius = mutate_f64(self.corner_radius, rng, rate, 0.01, 0.0, 0.35);
+        self.glass_opacity = mutate_f64(self.glass_opacity, rng, rate, 0.1, 0.0, 1.0);
+        self.grime_level = mutate_f64(self.grime_level, rng, rate, 0.1, 0.0, 1.0);
+        self.color_frame = mutate_color3(self.color_frame, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 6.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() {
+                self.seed
+            } else {
+                other.seed
+            },
+            frame_width: if rng.random::<bool>() {
+                self.frame_width
+            } else {
+                other.frame_width
+            },
+            panes_x: if rng.random::<bool>() {
+                self.panes_x
+            } else {
+                other.panes_x
+            },
+            panes_y: if rng.random::<bool>() {
+                self.panes_y
+            } else {
+                other.panes_y
+            },
+            mullion_thickness: if rng.random::<bool>() {
+                self.mullion_thickness
+            } else {
+                other.mullion_thickness
+            },
+            corner_radius: if rng.random::<bool>() {
+                self.corner_radius
+            } else {
+                other.corner_radius
+            },
+            glass_opacity: if rng.random::<bool>() {
+                self.glass_opacity
+            } else {
+                other.glass_opacity
+            },
+            grime_level: if rng.random::<bool>() {
+                self.grime_level
+            } else {
+                other.grime_level
+            },
+            color_frame: crossover_color3(self.color_frame, other.color_frame, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- PlankConfig ------------------------------------------------------------
+
+impl Genotype for PlankConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.plank_count = mutate_f64(self.plank_count, rng, rate, 1.0, 2.0, 12.0);
+        self.grain_scale = mutate_f64(self.grain_scale, rng, rate, 2.0, 4.0, 24.0);
+        self.joint_width = mutate_f64(self.joint_width, rng, rate, 0.02, 0.01, 0.25);
+        self.stagger = mutate_f64(self.stagger, rng, rate, 0.15, 0.0, 1.0);
+        self.knot_density = mutate_f64(self.knot_density, rng, rate, 0.1, 0.0, 1.0);
+        self.grain_warp = mutate_f64(self.grain_warp, rng, rate, 0.1, 0.0, 1.0);
+        self.color_wood_light = mutate_color3(self.color_wood_light, rng, rate, 0.07);
+        self.color_wood_dark = mutate_color3(self.color_wood_dark, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 6.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() {
+                self.seed
+            } else {
+                other.seed
+            },
+            plank_count: if rng.random::<bool>() {
+                self.plank_count
+            } else {
+                other.plank_count
+            },
+            grain_scale: if rng.random::<bool>() {
+                self.grain_scale
+            } else {
+                other.grain_scale
+            },
+            joint_width: if rng.random::<bool>() {
+                self.joint_width
+            } else {
+                other.joint_width
+            },
+            stagger: if rng.random::<bool>() {
+                self.stagger
+            } else {
+                other.stagger
+            },
+            knot_density: if rng.random::<bool>() {
+                self.knot_density
+            } else {
+                other.knot_density
+            },
+            grain_warp: if rng.random::<bool>() {
+                self.grain_warp
+            } else {
+                other.grain_warp
+            },
+            color_wood_light: crossover_color3(self.color_wood_light, other.color_wood_light, rng),
+            color_wood_dark: crossover_color3(self.color_wood_dark, other.color_wood_dark, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- ShingleConfig ----------------------------------------------------------
+
+impl Genotype for ShingleConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 2.0, 12.0);
+        self.shape_profile = mutate_f64(self.shape_profile, rng, rate, 0.2, 0.0, 1.0);
+        self.overlap = mutate_f64(self.overlap, rng, rate, 0.1, 0.0, 0.8);
+        self.stagger = mutate_f64(self.stagger, rng, rate, 0.15, 0.0, 1.0);
+        self.moss_level = mutate_f64(self.moss_level, rng, rate, 0.1, 0.0, 1.0);
+        self.color_tile = mutate_color3(self.color_tile, rng, rate, 0.07);
+        self.color_grout = mutate_color3(self.color_grout, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 8.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() {
+                self.seed
+            } else {
+                other.seed
+            },
+            scale: if rng.random::<bool>() {
+                self.scale
+            } else {
+                other.scale
+            },
+            shape_profile: if rng.random::<bool>() {
+                self.shape_profile
+            } else {
+                other.shape_profile
+            },
+            overlap: if rng.random::<bool>() {
+                self.overlap
+            } else {
+                other.overlap
+            },
+            stagger: if rng.random::<bool>() {
+                self.stagger
+            } else {
+                other.stagger
+            },
+            moss_level: if rng.random::<bool>() {
+                self.moss_level
+            } else {
+                other.moss_level
+            },
+            color_tile: crossover_color3(self.color_tile, other.color_tile, rng),
+            color_grout: crossover_color3(self.color_grout, other.color_grout, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
             },
         }
     }
