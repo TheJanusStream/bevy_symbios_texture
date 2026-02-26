@@ -1,13 +1,15 @@
 //! `texture_viewer` — interactive material viewer with egui editor.
 //!
-//! Displays the **albedo** (top) and **normal map** (bottom) for the active
-//! material. Use the egui side panel to cycle materials with **< Prev** /
-//! **Next >**, trigger a random **Mutate**, and edit every parameter live.
+//! Layout: **albedo** (left) | **normal map** (centre) | **spinning 3-D cube**
+//! (right) — a live PBR preview with the generated material applied.
+//!
+//! Use the egui panel to cycle materials with **< Prev** / **Next >**, trigger
+//! a random **Mutate**, and edit every parameter live.
 //!
 //! Run with:
 //!   cargo run --example texture_viewer --features egui
 
-use bevy::prelude::*;
+use bevy::{camera::Viewport, prelude::*};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use rand::{SeedableRng, rngs::StdRng};
 use symbios_genetics::Genotype;
@@ -32,17 +34,32 @@ use bevy_symbios_texture::{
 };
 
 const TEX_SIZE: u32 = 512;
+const GAP: u32 = 20;
 
-/// World-space Y centres for the albedo (top) and normal-map (bottom) sprites.
-const ALBEDO_Y: f32 = TEX_SIZE as f32 * 0.5 + 20.0;
-const NORMAL_Y: f32 = -(TEX_SIZE as f32 * 0.5 + 20.0);
+// Window dimensions: three 512-wide columns separated and padded by 20-px gaps.
+const WINDOW_W: u32 = 4 * GAP + 3 * TEX_SIZE; // 1616
+const WINDOW_H: u32 = 2 * GAP + TEX_SIZE; // 552
+
+// Camera2d sprite X positions (world-space; Camera2d origin = window centre).
+// Albedo panel centre = pixel (GAP + TEX_SIZE/2) = 276; window centre = 808.
+const ALBEDO_X: f32 = -((GAP + TEX_SIZE) as f32); // -532
+const NORMAL_X: f32 = 0.0; // centre of window
+
+// Camera3d viewport for the rightmost column (physical pixels).
+const CUBE_VP_X: u32 = 3 * GAP + 2 * TEX_SIZE; // 1084
+const CUBE_VP_W: u32 = TEX_SIZE + GAP; // 532
+
+// Size of the preview cube (world units) and spinning rates.
+const CUBE_SIZE: f32 = 240.0;
+const SPIN_X: f32 = 0.20; // rad/s around X
+const SPIN_Y: f32 = 0.45; // rad/s around Y
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "bevy_symbios_texture — material viewer".into(),
-                resolution: (TEX_SIZE + 40, TEX_SIZE * 2 + 40).into(),
+                resolution: (WINDOW_W, WINDOW_H).into(),
                 ..default()
             }),
             ..default()
@@ -54,6 +71,7 @@ fn main() {
         .add_systems(Startup, (setup_scene, spawn_tasks))
         .add_systems(EguiPrimaryContextPass, render_ui)
         .add_systems(Update, (collect_ready_textures, update_display).chain())
+        .add_systems(Update, spin_cube)
         .run();
 }
 
@@ -154,13 +172,17 @@ impl Default for ViewerRng {
 // Components
 // ---------------------------------------------------------------------------
 
-/// Sprite showing the albedo of the active material.
+/// Sprite showing the albedo of the active material (left column).
 #[derive(Component)]
 struct AlbedoDisplay;
 
-/// Sprite showing the normal map of the active material.
+/// Sprite showing the normal map of the active material (centre column).
 #[derive(Component)]
 struct NormalDisplay;
+
+/// Spinning 3-D cube in the right column — previews the full PBR material.
+#[derive(Component)]
+struct CubeDisplay;
 
 /// Carried on async-task entities to route results back to the right slot.
 #[derive(Component, Clone, Copy)]
@@ -191,41 +213,82 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
 
     for (i, config) in configs.iter().enumerate() {
         let pending = config.spawn_pending(TEX_SIZE, TEX_SIZE);
-        commands.spawn((
-            pending,
-            TaskSlot {
-                slot: i,
-                generation: 0,
-            },
-        ));
+        commands.spawn((pending, TaskSlot { slot: i, generation: 0 }));
     }
 
     store.configs = configs;
 }
 
-fn setup_scene(mut commands: Commands) {
-    commands.spawn(Camera2d);
+fn setup_scene(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    // Camera2d — renders albedo and normal-map sprites to the full window.
+    commands.spawn((Camera2d, Camera { order: 0, ..default() }));
 
-    // Albedo sprite — grey placeholder until texture is ready.
+    // Camera3d — renders the spinning PBR cube into the rightmost column only.
+    commands.spawn((
+        Camera3d::default(),
+        Camera {
+            order: 1,
+            viewport: Some(Viewport {
+                physical_position: UVec2::new(CUBE_VP_X, 0),
+                physical_size: UVec2::new(CUBE_VP_W, WINDOW_H),
+                ..default()
+            }),
+            ..default()
+        },
+        // Slightly elevated camera angle for a clearer 3-D impression.
+        Transform::from_xyz(0.0, 160.0, 560.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    // Directional light so the cube shows shading and normal-map detail.
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 3500.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_xyz(4.0, 6.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
+
+    // Albedo sprite — left column, grey placeholder until texture is ready.
     commands.spawn((
         Sprite {
             color: Color::srgb(0.25, 0.25, 0.25),
             custom_size: Some(Vec2::splat(TEX_SIZE as f32)),
             ..default()
         },
-        Transform::from_translation(Vec3::new(0.0, ALBEDO_Y, 0.0)),
+        Transform::from_translation(Vec3::new(ALBEDO_X, 0.0, 0.0)),
         AlbedoDisplay,
     ));
 
-    // Normal-map sprite — grey placeholder.
+    // Normal-map sprite — centre column, grey placeholder.
     commands.spawn((
         Sprite {
             color: Color::srgb(0.25, 0.25, 0.25),
             custom_size: Some(Vec2::splat(TEX_SIZE as f32)),
             ..default()
         },
-        Transform::from_translation(Vec3::new(0.0, NORMAL_Y, 0.0)),
+        Transform::from_translation(Vec3::new(NORMAL_X, 0.0, 0.0)),
         NormalDisplay,
+    ));
+
+    // 3-D preview cube — material is updated once textures arrive.
+    // Tangents must be generated explicitly; Cuboid doesn't include them by
+    // default and they are required for normal-map shading to work.
+    let mut cube_mesh = Cuboid::new(CUBE_SIZE, CUBE_SIZE, CUBE_SIZE).mesh().build();
+    let _ = cube_mesh.generate_tangents();
+    commands.spawn((
+        Mesh3d(meshes.add(cube_mesh)),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.0, 0.0, 0.0),
+            metallic: 0.0,
+            perceptual_roughness: 1.0,
+            ..default()
+        })),
+        CubeDisplay,
     ));
 }
 
@@ -244,6 +307,14 @@ fn collect_ready_textures(
         if store.generations[task_slot.slot] == task_slot.generation {
             store.textures[task_slot.slot] = Some((tex.0.albedo.clone(), tex.0.normal.clone()));
         }
+    }
+}
+
+/// Slowly rotates the preview cube each frame.
+fn spin_cube(time: Res<Time>, mut query: Query<&mut Transform, With<CubeDisplay>>) {
+    let t = time.elapsed_secs();
+    for mut transform in &mut query {
+        transform.rotation = Quat::from_euler(EulerRot::XYZ, t * SPIN_X, t * SPIN_Y, 0.0);
     }
 }
 
@@ -270,7 +341,7 @@ fn render_ui(
     let mut regen = false;
 
     egui::Window::new(title)
-        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
+       // .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
         .default_width(280.0)
         .resizable(true)
         .show(ctx, |ui| {
@@ -331,22 +402,18 @@ fn render_ui(
         let next_gen = store.generations[slot].wrapping_add(1);
         store.generations[slot] = next_gen;
         let pending = store.configs[slot].spawn_pending(TEX_SIZE, TEX_SIZE);
-        commands.spawn((
-            pending,
-            TaskSlot {
-                slot,
-                generation: next_gen,
-            },
-        ));
+        commands.spawn((pending, TaskSlot { slot, generation: next_gen }));
     }
 }
 
-/// Keeps the displayed sprites in sync with `CurrentSlot`.
+/// Keeps the displayed sprites and PBR cube in sync with `CurrentSlot`.
 fn update_display(
     store: Res<MaterialStore>,
     current: Res<CurrentSlot>,
     mut albedo_q: Query<&mut Sprite, (With<AlbedoDisplay>, Without<NormalDisplay>)>,
     mut normal_q: Query<&mut Sprite, (With<NormalDisplay>, Without<AlbedoDisplay>)>,
+    cube_q: Query<&MeshMaterial3d<StandardMaterial>, With<CubeDisplay>>,
+    mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if store.configs.is_empty() {
         return;
@@ -368,6 +435,20 @@ fn update_display(
                     sprite.color = Color::WHITE;
                 }
             }
+            // Update cube material only when the albedo handle actually changed.
+            if let Ok(cube_mat) = cube_q.single() {
+                let needs_update = std_materials
+                    .get(&cube_mat.0)
+                    .map(|m| m.base_color_texture.as_ref() != Some(albedo))
+                    .unwrap_or(false);
+                if needs_update {
+                    if let Some(mat) = std_materials.get_mut(&cube_mat.0) {
+                        mat.base_color_texture = Some(albedo.clone());
+                        mat.normal_map_texture = Some(normal.clone());
+                        mat.base_color = Color::WHITE;
+                    }
+                }
+            }
         }
         None => {
             if let Ok(mut sprite) = albedo_q.single_mut() {
@@ -377,6 +458,19 @@ fn update_display(
             if let Ok(mut sprite) = normal_q.single_mut() {
                 sprite.image = Handle::default();
                 sprite.color = Color::srgb(0.25, 0.25, 0.25);
+            }
+            if let Ok(cube_mat) = cube_q.single() {
+                let needs_reset = std_materials
+                    .get(&cube_mat.0)
+                    .map(|m| m.base_color_texture.is_some())
+                    .unwrap_or(false);
+                if needs_reset {
+                    if let Some(mat) = std_materials.get_mut(&cube_mat.0) {
+                        mat.base_color_texture = None;
+                        mat.normal_map_texture = None;
+                        mat.base_color = Color::srgb(0.4, 0.4, 0.4);
+                    }
+                }
             }
         }
     }
