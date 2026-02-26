@@ -95,14 +95,14 @@ impl Default for LeafConfig {
     fn default() -> Self {
         Self {
             seed: 0,
-            color_base: [0.12, 0.35, 0.08],
+            color_base: [0.12, 0.19, 0.11],
             color_edge: [0.35, 0.28, 0.05],
             serration_strength: 0.12,
             vein_angle: 2.5,
             micro_detail: 0.3,
-            normal_strength: 3.0,
-            lobe_count: 0.0,
-            lobe_depth: 0.35,
+            normal_strength: 1.0,
+            lobe_count: 4.0,
+            lobe_depth: 0.23,
             lobe_sharpness: 1.0,
             petiole_length: 0.12,
             petiole_width: 0.022,

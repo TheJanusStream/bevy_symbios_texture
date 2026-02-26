@@ -58,17 +58,17 @@ impl Default for BarkConfig {
     fn default() -> Self {
         Self {
             seed: 42,
-            scale: 4.0,
+            scale: 2.0,
             octaves: 6,
             warp_u: 0.15,
             warp_v: 0.55,
             color_light: [0.45, 0.28, 0.14],
-            color_dark: [0.18, 0.10, 0.05],
+            color_dark: [0.09, 0.05, 0.03],
             normal_strength: 3.0,
-            furrow_multiplier: 0.55,
+            furrow_multiplier: 0.78,
             furrow_scale_u: 2.0,
-            furrow_scale_v: 0.25,
-            furrow_shape: 0.4,
+            furrow_scale_v: 0.48,
+            furrow_shape: 2.0,
         }
     }
 }

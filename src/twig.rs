@@ -90,13 +90,13 @@ impl Default for TwigConfig {
     fn default() -> Self {
         Self {
             leaf: LeafConfig::default(),
-            stem_color: [0.25, 0.16, 0.07],
-            stem_half_width: 0.015,
+            stem_color: [0.16, 0.07, 0.06],
+            stem_half_width: 0.021,
             leaf_pairs: 4,
             leaf_angle: FRAC_PI_2 - 0.35, // ≈ 70° — slightly below perpendicular, drooping
             leaf_scale: 0.38,
-            stem_curve: 0.05,
-            sympodial: false,
+            stem_curve: 0.015,
+            sympodial: true,
         }
     }
 }
