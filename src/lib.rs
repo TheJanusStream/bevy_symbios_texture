@@ -37,6 +37,9 @@ pub mod shingle;
 pub mod twig;
 pub mod window;
 
+#[cfg(feature = "egui")]
+pub mod ui;
+
 pub use generator::{
     GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images, map_to_images_card,
 };

@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."
@@ -10,8 +10,13 @@ repository = "https://github.com/TheJanusStream/bevy_symbios_texture"
 keywords = ["texture", "procedural", "generative", "simulation"]
 categories = ["simulation", "game-development", "mathematics"]
 
+[features]
+default = []
+egui = ["dep:bevy_egui"]
+
 [dependencies]
 bevy = "0.18"
+bevy_egui = { version = "0.39", optional = true }
 noise = "0.9"
 rand = "0.9"
 rayon = "1.11"
@@ -21,6 +26,11 @@ symbios-genetics = "0.1"
 [dev-dependencies]
 serde_json = "1.0"
 criterion = "0.8"
+bevy_egui = "0.39"
+
+[[example]]
+name = "texture_viewer"
+required-features = ["egui"]
 
 [[bench]]
 name = "bench_main"

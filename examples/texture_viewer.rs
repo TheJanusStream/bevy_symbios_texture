@@ -1,13 +1,14 @@
-//! `texture_viewer` — displays one material at a time with Prev/Next navigation.
+//! `texture_viewer` — interactive material viewer with egui editor.
 //!
-//! Shows the **albedo** (top) and **normal map** (bottom) for the active material.
-//! Use the **< Prev** and **Next >** buttons to cycle through all nine materials.
-//! **Click the albedo panel** to mutate the current material with new random parameters.
+//! Displays the **albedo** (top) and **normal map** (bottom) for the active
+//! material. Use the egui side panel to cycle materials with **< Prev** /
+//! **Next >**, trigger a random **Mutate**, and edit every parameter live.
 //!
 //! Run with:
-//!   cargo run --example texture_viewer
+//!   cargo run --example texture_viewer --features egui
 
 use bevy::prelude::*;
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use rand::{SeedableRng, rngs::StdRng};
 use symbios_genetics::Genotype;
 
@@ -22,6 +23,11 @@ use bevy_symbios_texture::{
     rock::RockConfig,
     shingle::ShingleConfig,
     twig::TwigConfig,
+    ui::{
+        bark_config_editor, brick_config_editor, ground_config_editor, leaf_config_editor,
+        plank_config_editor, rock_config_editor, shingle_config_editor, twig_config_editor,
+        window_config_editor,
+    },
     window::WindowConfig,
 };
 
@@ -36,25 +42,18 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "bevy_symbios_texture — material viewer".into(),
-                resolution: (TEX_SIZE + 40, TEX_SIZE * 2 + 140).into(),
+                resolution: (TEX_SIZE + 40, TEX_SIZE * 2 + 40).into(),
                 ..default()
             }),
             ..default()
         }))
-        .add_plugins(SymbiosTexturePlugin)
+        .add_plugins((SymbiosTexturePlugin, EguiPlugin::default()))
         .init_resource::<MaterialStore>()
         .init_resource::<CurrentSlot>()
+        .init_resource::<ViewerRng>()
         .add_systems(Startup, (setup_scene, spawn_tasks))
-        .add_systems(
-            Update,
-            (
-                collect_ready_textures,
-                handle_nav_buttons,
-                handle_albedo_click,
-                update_display,
-            )
-                .chain(),
-        )
+        .add_systems(EguiPrimaryContextPass, render_ui)
+        .add_systems(Update, (collect_ready_textures, update_display).chain())
         .run();
 }
 
@@ -137,11 +136,25 @@ struct MaterialStore {
 #[derive(Resource, Default)]
 struct CurrentSlot(usize);
 
+/// Seeded RNG used for config mutation.
+#[derive(Resource)]
+struct ViewerRng(StdRng);
+
+impl Default for ViewerRng {
+    fn default() -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+        Self(StdRng::seed_from_u64(seed))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------------
 
-/// Sprite showing the albedo of the active material (clickable).
+/// Sprite showing the albedo of the active material.
 #[derive(Component)]
 struct AlbedoDisplay;
 
@@ -149,22 +162,11 @@ struct AlbedoDisplay;
 #[derive(Component)]
 struct NormalDisplay;
 
-/// UI text label with the active material's name.
-#[derive(Component)]
-struct MaterialLabel;
-
 /// Carried on async-task entities to route results back to the right slot.
 #[derive(Component, Clone, Copy)]
 struct TaskSlot {
     slot: usize,
     generation: u32,
-}
-
-/// Navigation button direction.
-#[derive(Component)]
-enum NavButton {
-    Prev,
-    Next,
 }
 
 // ---------------------------------------------------------------------------
@@ -225,95 +227,6 @@ fn setup_scene(mut commands: Commands) {
         Transform::from_translation(Vec3::new(0.0, NORMAL_Y, 0.0)),
         NormalDisplay,
     ));
-
-    // UI: bottom bar — < Prev | material name | Next >
-    commands
-        .spawn(Node {
-            width: Val::Percent(100.0),
-            height: Val::Percent(100.0),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::FlexEnd,
-            ..default()
-        })
-        .with_children(|root| {
-            root.spawn(Node {
-                flex_direction: FlexDirection::Row,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(20.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                ..default()
-            })
-            .with_children(|row| {
-                // Prev button
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(110.0),
-                        height: Val::Px(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                    NavButton::Prev,
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new("< Prev"),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-
-                row.spawn((
-                    Node {
-                        min_width: Val::Px(240.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    },
-                    Text::new("Loading\u{2026}"),
-                    TextFont {
-                        font_size: 20.0,
-                        ..default()
-                    },
-                    TextColor(Color::WHITE),
-                    MaterialLabel,
-                ));
-
-                // Next button
-                row.spawn((
-                    Button,
-                    Node {
-                        width: Val::Px(110.0),
-                        height: Val::Px(40.0),
-                        justify_content: JustifyContent::Center,
-                        align_items: AlignItems::Center,
-                        border: UiRect::all(Val::Px(1.0)),
-                        ..default()
-                    },
-                    BorderColor::all(Color::srgb(0.5, 0.5, 0.5)),
-                    BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                    NavButton::Next,
-                ))
-                .with_children(|btn| {
-                    btn.spawn((
-                        Text::new("Next >"),
-                        TextFont {
-                            font_size: 18.0,
-                            ..default()
-                        },
-                        TextColor(Color::WHITE),
-                    ));
-                });
-            });
-        });
 }
 
 // ---------------------------------------------------------------------------
@@ -334,68 +247,86 @@ fn collect_ready_textures(
     }
 }
 
-/// Advances or retreats `CurrentSlot` when a nav button is pressed.
-fn handle_nav_buttons(
-    nav_q: Query<(&Interaction, &NavButton), Changed<Interaction>>,
+/// Egui panel: navigation, loading indicator, mutate button, config editor.
+fn render_ui(
+    mut contexts: EguiContexts,
+    mut store: ResMut<MaterialStore>,
     mut current: ResMut<CurrentSlot>,
-    store: Res<MaterialStore>,
+    mut rng: ResMut<ViewerRng>,
+    mut commands: Commands,
 ) {
+    let Ok(ctx) = contexts.ctx_mut() else { return };
     let n = store.configs.len();
     if n == 0 {
         return;
     }
-    for (interaction, nav) in &nav_q {
-        if *interaction == Interaction::Pressed {
-            match nav {
-                NavButton::Prev => current.0 = (current.0 + n - 1) % n,
-                NavButton::Next => current.0 = (current.0 + 1) % n,
+
+    let slot = current.0;
+    let title = store.configs[slot].label();
+    let loading = store.textures[slot].is_none();
+
+    let mut nav_delta: i32 = 0;
+    let mut mutate = false;
+    let mut regen = false;
+
+    egui::Window::new(title)
+        .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
+        .default_width(280.0)
+        .resizable(true)
+        .show(ctx, |ui| {
+            // Navigation row
+            ui.horizontal(|ui| {
+                if ui.button("< Prev").clicked() {
+                    nav_delta = -1;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Next >").clicked() {
+                        nav_delta = 1;
+                    }
+                });
+            });
+
+            if loading {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Generating...");
+                });
             }
-        }
+
+            if ui.button("Mutate").clicked() {
+                mutate = true;
+            }
+
+            ui.separator();
+
+            let id = egui::Id::new("viewer_config");
+            let (_, r) = match &mut store.configs[slot] {
+                PanelConfig::Bark(c) => bark_config_editor(ui, c, id),
+                PanelConfig::Rock(c) => rock_config_editor(ui, c, id),
+                PanelConfig::Ground(c) => ground_config_editor(ui, c, id),
+                PanelConfig::Leaf(c) => leaf_config_editor(ui, c, id),
+                PanelConfig::Twig(c) => twig_config_editor(ui, c, id),
+                PanelConfig::Brick(c) => brick_config_editor(ui, c, id),
+                PanelConfig::Window(c) => window_config_editor(ui, c, id),
+                PanelConfig::Plank(c) => plank_config_editor(ui, c, id),
+                PanelConfig::Shingle(c) => shingle_config_editor(ui, c, id),
+            };
+            regen = r;
+        });
+
+    // Apply navigation (takes effect next frame).
+    if nav_delta != 0 {
+        current.0 = ((slot as i32 + nav_delta).rem_euclid(n as i32)) as usize;
     }
-}
 
-/// Mutates the current material when the user left-clicks the albedo panel.
-fn handle_albedo_click(
-    buttons: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    camera_q: Query<(&Camera, &GlobalTransform), With<Camera2d>>,
-    albedo_q: Query<&Transform, With<AlbedoDisplay>>,
-    mut store: ResMut<MaterialStore>,
-    current: Res<CurrentSlot>,
-    mut commands: Commands,
-    mut rng: Local<Option<StdRng>>,
-) {
-    if !buttons.just_pressed(MouseButton::Left) {
-        return;
+    // Mutation randomises the config then triggers regen.
+    if mutate {
+        store.configs[slot].mutate_in_place(&mut rng.0, 0.3);
+        regen = true;
     }
 
-    let rng = rng.get_or_insert_with(|| {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos() as u64;
-        StdRng::seed_from_u64(seed)
-    });
-
-    let Ok(window) = windows.single() else { return };
-    let Some(cursor_pos) = window.cursor_position() else {
-        return;
-    };
-    let Ok((camera, cam_transform)) = camera_q.single() else {
-        return;
-    };
-    let Some(world_pos) = camera.viewport_to_world_2d(cam_transform, cursor_pos).ok() else {
-        return;
-    };
-
-    let Ok(transform) = albedo_q.single() else {
-        return;
-    };
-    let center = transform.translation.truncate();
-    let half = TEX_SIZE as f32 * 0.5;
-    if (world_pos - center).abs().cmple(Vec2::splat(half)).all() {
-        let slot = current.0;
-        store.configs[slot].mutate_in_place(rng, 0.3);
+    // Spawn a new generation task whenever regen is requested.
+    if regen {
         store.textures[slot] = None;
         let next_gen = store.generations[slot].wrapping_add(1);
         store.generations[slot] = next_gen;
@@ -410,31 +341,18 @@ fn handle_albedo_click(
     }
 }
 
-/// Keeps the displayed sprites and label in sync with `CurrentSlot`.
+/// Keeps the displayed sprites in sync with `CurrentSlot`.
 fn update_display(
     store: Res<MaterialStore>,
     current: Res<CurrentSlot>,
     mut albedo_q: Query<&mut Sprite, (With<AlbedoDisplay>, Without<NormalDisplay>)>,
     mut normal_q: Query<&mut Sprite, (With<NormalDisplay>, Without<AlbedoDisplay>)>,
-    mut label_q: Query<&mut Text, With<MaterialLabel>>,
 ) {
     if store.configs.is_empty() {
         return;
     }
 
     let slot = current.0;
-    let name = store.configs[slot].label();
-
-    if let Ok(mut text) = label_q.single_mut() {
-        let new_label = if store.textures[slot].is_none() {
-            format!("{name} (loading\u{2026})")
-        } else {
-            format!("{name}  \u{00b7}  click albedo to mutate")
-        };
-        if text.0 != new_label {
-            text.0 = new_label;
-        }
-    }
 
     match &store.textures[slot] {
         Some((albedo, normal)) => {
@@ -452,7 +370,6 @@ fn update_display(
             }
         }
         None => {
-            // Show grey while loading.
             if let Ok(mut sprite) = albedo_q.single_mut() {
                 sprite.image = Handle::default();
                 sprite.color = Color::srgb(0.25, 0.25, 0.25);
