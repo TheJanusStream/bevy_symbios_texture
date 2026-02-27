@@ -62,15 +62,19 @@ use bevy::{
 use crate::{
     bark::{BarkConfig, BarkGenerator},
     brick::{BrickConfig, BrickGenerator},
+    concrete::{ConcreteConfig, ConcreteGenerator},
     generator::{
         GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images,
         map_to_images_card,
     },
     ground::{GroundConfig, GroundGenerator},
     leaf::{LeafConfig, LeafGenerator},
+    metal::{MetalConfig, MetalGenerator},
+    pavers::{PaversConfig, PaversGenerator},
     plank::{PlankConfig, PlankGenerator},
     rock::{RockConfig, RockGenerator},
     shingle::{ShingleConfig, ShingleGenerator},
+    stucco::{StuccoConfig, StuccoGenerator},
     twig::{TwigConfig, TwigGenerator},
     window::{WindowConfig, WindowGenerator},
 };
@@ -222,6 +226,30 @@ impl PendingTexture {
     /// Spawn a roof-shingle texture generation thread at `width × height` texels.
     pub fn shingle(config: ShingleConfig, width: u32, height: u32) -> Self {
         let generator = ShingleGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a stucco / render texture generation thread at `width × height` texels.
+    pub fn stucco(config: StuccoConfig, width: u32, height: u32) -> Self {
+        let generator = StuccoGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a concrete texture generation thread at `width × height` texels.
+    pub fn concrete(config: ConcreteConfig, width: u32, height: u32) -> Self {
+        let generator = ConcreteGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a metal texture generation thread at `width × height` texels.
+    pub fn metal(config: MetalConfig, width: u32, height: u32) -> Self {
+        let generator = MetalGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a pavers / tiles texture generation thread at `width × height` texels.
+    pub fn pavers(config: PaversConfig, width: u32, height: u32) -> Self {
+        let generator = PaversGenerator::new(config);
         spawn_task(move || generator.generate(width, height), false)
     }
 }

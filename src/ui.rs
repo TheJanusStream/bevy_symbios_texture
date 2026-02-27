@@ -25,11 +25,15 @@ use bevy_egui::egui;
 
 use crate::bark::BarkConfig;
 use crate::brick::BrickConfig;
+use crate::concrete::ConcreteConfig;
 use crate::ground::GroundConfig;
 use crate::leaf::LeafConfig;
+use crate::metal::{MetalConfig, MetalStyle};
+use crate::pavers::{PaversConfig, PaversLayout};
 use crate::plank::PlankConfig;
 use crate::rock::RockConfig;
 use crate::shingle::ShingleConfig;
+use crate::stucco::StuccoConfig;
 use crate::twig::TwigConfig;
 use crate::window::WindowConfig;
 
@@ -544,6 +548,256 @@ pub fn shingle_config_editor(
                 &mut regen,
             );
             color_instant(ui, "Tile Color", &mut cfg.color_tile, &mut wb, &mut regen);
+            color_instant(ui, "Grout Color", &mut cfg.color_grout, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`StuccoConfig`] parameters inside a collapsing header.
+pub fn stucco_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut StuccoConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Stucco Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=20.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            usize_instant(ui, &mut cfg.octaves, 1..=10, "Octaves", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Base Color", &mut cfg.color_base, &mut wb, &mut regen);
+            color_instant(ui, "Shadow Color", &mut cfg.color_shadow, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`ConcreteConfig`] parameters inside a collapsing header.
+pub fn concrete_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut ConcreteConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Concrete Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=16.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            usize_instant(ui, &mut cfg.octaves, 1..=10, "Octaves", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.formwork_lines, 0.0..=12.0).text("Formwork Lines"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.formwork_depth, 0.0..=0.5).text("Formwork Depth"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.pit_density, 0.0..=0.45).text("Pit Density"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Base Color", &mut cfg.color_base, &mut wb, &mut regen);
+            color_instant(ui, "Pit Color", &mut cfg.color_pit, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`MetalConfig`] parameters inside a collapsing header.
+pub fn metal_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut MetalConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Metal Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            // Style selector
+            ui.horizontal(|ui| {
+                ui.label("Style:");
+                let brushed = cfg.style == MetalStyle::Brushed;
+                if ui.selectable_label(brushed, "Brushed").clicked() && !brushed {
+                    cfg.style = MetalStyle::Brushed;
+                    wb = true;
+                    regen = true;
+                }
+                let seam = cfg.style == MetalStyle::StandingSeam;
+                if ui.selectable_label(seam, "Standing Seam").clicked() && !seam {
+                    cfg.style = MetalStyle::StandingSeam;
+                    wb = true;
+                    regen = true;
+                }
+            });
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=16.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.seam_count, 1.0..=16.0).text("Seam Count"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.seam_sharpness, 0.5..=6.0).text("Seam Sharpness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.brush_stretch, 1.0..=20.0).text("Brush Stretch"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.metallic, 0.0..=1.0).text("Metallic"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.rust_level, 0.0..=1.0).text("Rust"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Metal Color", &mut cfg.color_metal, &mut wb, &mut regen);
+            color_instant(ui, "Rust Color", &mut cfg.color_rust, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`PaversConfig`] parameters inside a collapsing header.
+pub fn pavers_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut PaversConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Pavers Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            // Layout selector
+            ui.horizontal(|ui| {
+                ui.label("Layout:");
+                let sq = cfg.layout == PaversLayout::Square;
+                if ui.selectable_label(sq, "Square").clicked() && !sq {
+                    cfg.layout = PaversLayout::Square;
+                    wb = true;
+                    regen = true;
+                }
+                let hx = cfg.layout == PaversLayout::Hexagonal;
+                if ui.selectable_label(hx, "Hexagonal").clicked() && !hx {
+                    cfg.layout = PaversLayout::Hexagonal;
+                    wb = true;
+                    regen = true;
+                }
+            });
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=16.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.aspect_ratio, 0.5..=3.0).text("Aspect Ratio"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.grout_width, 0.0..=0.35).text("Grout Width"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.bevel, 0.0..=1.0).text("Bevel"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.cell_variance, 0.0..=0.8).text("Color Variance"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Surface Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Stone Color", &mut cfg.color_stone, &mut wb, &mut regen);
             color_instant(ui, "Grout Color", &mut cfg.color_grout, &mut wb, &mut regen);
             slider_debounced(
                 ui,

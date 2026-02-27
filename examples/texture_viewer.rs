@@ -19,15 +19,20 @@ use bevy_symbios_texture::{
     async_gen::{PendingTexture, TextureReady},
     bark::BarkConfig,
     brick::BrickConfig,
+    concrete::ConcreteConfig,
     ground::GroundConfig,
     leaf::LeafConfig,
+    metal::MetalConfig,
+    pavers::PaversConfig,
     plank::PlankConfig,
     rock::RockConfig,
     shingle::ShingleConfig,
+    stucco::StuccoConfig,
     twig::TwigConfig,
     ui::{
-        bark_config_editor, brick_config_editor, ground_config_editor, leaf_config_editor,
-        plank_config_editor, rock_config_editor, shingle_config_editor, twig_config_editor,
+        bark_config_editor, brick_config_editor, concrete_config_editor, ground_config_editor,
+        leaf_config_editor, metal_config_editor, pavers_config_editor, plank_config_editor,
+        rock_config_editor, shingle_config_editor, stucco_config_editor, twig_config_editor,
         window_config_editor,
     },
     window::WindowConfig,
@@ -90,6 +95,10 @@ enum PanelConfig {
     Window(WindowConfig),
     Plank(PlankConfig),
     Shingle(ShingleConfig),
+    Stucco(StuccoConfig),
+    Concrete(ConcreteConfig),
+    Metal(MetalConfig),
+    Pavers(PaversConfig),
 }
 
 impl PanelConfig {
@@ -104,6 +113,10 @@ impl PanelConfig {
             PanelConfig::Window(c) => c.mutate(rng, rate),
             PanelConfig::Plank(c) => c.mutate(rng, rate),
             PanelConfig::Shingle(c) => c.mutate(rng, rate),
+            PanelConfig::Stucco(c) => c.mutate(rng, rate),
+            PanelConfig::Concrete(c) => c.mutate(rng, rate),
+            PanelConfig::Metal(c) => c.mutate(rng, rate),
+            PanelConfig::Pavers(c) => c.mutate(rng, rate),
         }
     }
 
@@ -118,6 +131,10 @@ impl PanelConfig {
             PanelConfig::Window(c) => PendingTexture::window(c.clone(), width, height),
             PanelConfig::Plank(c) => PendingTexture::plank(c.clone(), width, height),
             PanelConfig::Shingle(c) => PendingTexture::shingle(c.clone(), width, height),
+            PanelConfig::Stucco(c) => PendingTexture::stucco(c.clone(), width, height),
+            PanelConfig::Concrete(c) => PendingTexture::concrete(c.clone(), width, height),
+            PanelConfig::Metal(c) => PendingTexture::metal(c.clone(), width, height),
+            PanelConfig::Pavers(c) => PendingTexture::pavers(c.clone(), width, height),
         }
     }
 
@@ -132,6 +149,10 @@ impl PanelConfig {
             PanelConfig::Window(_) => "Window",
             PanelConfig::Plank(_) => "Plank",
             PanelConfig::Shingle(_) => "Shingle",
+            PanelConfig::Stucco(_) => "Stucco",
+            PanelConfig::Concrete(_) => "Concrete",
+            PanelConfig::Metal(_) => "Metal",
+            PanelConfig::Pavers(_) => "Pavers",
         }
     }
 }
@@ -206,6 +227,10 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
         PanelConfig::Window(WindowConfig::default()),
         PanelConfig::Plank(PlankConfig::default()),
         PanelConfig::Shingle(ShingleConfig::default()),
+        PanelConfig::Stucco(StuccoConfig::default()),
+        PanelConfig::Concrete(ConcreteConfig::default()),
+        PanelConfig::Metal(MetalConfig::default()),
+        PanelConfig::Pavers(PaversConfig::default()),
     ];
 
     store.textures = vec![None; configs.len()];
@@ -333,29 +358,28 @@ fn render_ui(
     }
 
     let slot = current.0;
-    let title = store.configs[slot].label();
     let loading = store.textures[slot].is_none();
 
-    let mut nav_delta: i32 = 0;
+    let mut new_slot: Option<usize> = None;
     let mut mutate = false;
     let mut regen = false;
 
-    egui::Window::new(title)
-       // .anchor(egui::Align2::RIGHT_TOP, egui::Vec2::new(-10.0, 10.0))
+    egui::Window::new("Material Viewer")
         .default_width(280.0)
         .resizable(true)
         .show(ctx, |ui| {
-            // Navigation row
-            ui.horizontal(|ui| {
-                if ui.button("< Prev").clicked() {
-                    nav_delta = -1;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Next >").clicked() {
-                        nav_delta = 1;
+            // Material selector dropdown.
+            egui::ComboBox::from_id_salt("material_select")
+                .selected_text(store.configs[slot].label())
+                .width(ui.available_width() - 8.0)
+                .show_ui(ui, |ui| {
+                    for i in 0..n {
+                        let label = store.configs[i].label();
+                        if ui.selectable_label(i == slot, label).clicked() {
+                            new_slot = Some(i);
+                        }
                     }
                 });
-            });
 
             if loading {
                 ui.horizontal(|ui| {
@@ -381,13 +405,17 @@ fn render_ui(
                 PanelConfig::Window(c) => window_config_editor(ui, c, id),
                 PanelConfig::Plank(c) => plank_config_editor(ui, c, id),
                 PanelConfig::Shingle(c) => shingle_config_editor(ui, c, id),
+                PanelConfig::Stucco(c) => stucco_config_editor(ui, c, id),
+                PanelConfig::Concrete(c) => concrete_config_editor(ui, c, id),
+                PanelConfig::Metal(c) => metal_config_editor(ui, c, id),
+                PanelConfig::Pavers(c) => pavers_config_editor(ui, c, id),
             };
             regen = r;
         });
 
-    // Apply navigation (takes effect next frame).
-    if nav_delta != 0 {
-        current.0 = ((slot as i32 + nav_delta).rem_euclid(n as i32)) as usize;
+    // Apply dropdown selection.
+    if let Some(s) = new_slot {
+        current.0 = s;
     }
 
     // Mutation randomises the config then triggers regen.

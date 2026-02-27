@@ -20,8 +20,18 @@ use rand::Rng;
 use symbios_genetics::Genotype;
 
 use crate::{
-    bark::BarkConfig, brick::BrickConfig, ground::GroundConfig, leaf::LeafConfig,
-    plank::PlankConfig, rock::RockConfig, shingle::ShingleConfig, twig::TwigConfig,
+    bark::BarkConfig,
+    brick::BrickConfig,
+    concrete::ConcreteConfig,
+    ground::GroundConfig,
+    leaf::LeafConfig,
+    metal::MetalConfig,
+    pavers::PaversConfig,
+    plank::PlankConfig,
+    rock::RockConfig,
+    shingle::ShingleConfig,
+    stucco::StuccoConfig,
+    twig::TwigConfig,
     window::WindowConfig,
 };
 
@@ -685,6 +695,185 @@ impl Genotype for ShingleConfig {
                 other.moss_level
             },
             color_tile: crossover_color3(self.color_tile, other.color_tile, rng),
+            color_grout: crossover_color3(self.color_grout, other.color_grout, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- StuccoConfig -----------------------------------------------------------
+
+impl Genotype for StuccoConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.5, 1.0, 20.0);
+        self.octaves = mutate_usize(self.octaves, rng, rate, 1, 10);
+        self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
+        self.color_base = mutate_color3(self.color_base, rng, rate, 0.07);
+        self.color_shadow = mutate_color3(self.color_shadow, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 6.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() { self.seed } else { other.seed },
+            scale: if rng.random::<bool>() { self.scale } else { other.scale },
+            octaves: if rng.random::<bool>() { self.octaves } else { other.octaves },
+            roughness: if rng.random::<bool>() { self.roughness } else { other.roughness },
+            color_base: crossover_color3(self.color_base, other.color_base, rng),
+            color_shadow: crossover_color3(self.color_shadow, other.color_shadow, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- ConcreteConfig ---------------------------------------------------------
+
+impl Genotype for ConcreteConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
+        self.octaves = mutate_usize(self.octaves, rng, rate, 1, 10);
+        self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
+        self.formwork_lines = mutate_f64(self.formwork_lines, rng, rate, 1.0, 0.0, 12.0);
+        self.formwork_depth = mutate_f64(self.formwork_depth, rng, rate, 0.05, 0.0, 0.5);
+        self.pit_density = mutate_f64(self.pit_density, rng, rate, 0.04, 0.0, 0.45);
+        self.color_base = mutate_color3(self.color_base, rng, rate, 0.07);
+        self.color_pit = mutate_color3(self.color_pit, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 6.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() { self.seed } else { other.seed },
+            scale: if rng.random::<bool>() { self.scale } else { other.scale },
+            octaves: if rng.random::<bool>() { self.octaves } else { other.octaves },
+            roughness: if rng.random::<bool>() { self.roughness } else { other.roughness },
+            formwork_lines: if rng.random::<bool>() {
+                self.formwork_lines
+            } else {
+                other.formwork_lines
+            },
+            formwork_depth: if rng.random::<bool>() {
+                self.formwork_depth
+            } else {
+                other.formwork_depth
+            },
+            pit_density: if rng.random::<bool>() { self.pit_density } else { other.pit_density },
+            color_base: crossover_color3(self.color_base, other.color_base, rng),
+            color_pit: crossover_color3(self.color_pit, other.color_pit, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- MetalConfig ------------------------------------------------------------
+
+impl Genotype for MetalConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        // style: flip randomly with probability rate.
+        if rng.random::<f32>() < rate {
+            self.style = match self.style {
+                crate::metal::MetalStyle::Brushed => crate::metal::MetalStyle::StandingSeam,
+                crate::metal::MetalStyle::StandingSeam => crate::metal::MetalStyle::Brushed,
+            };
+        }
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
+        self.seam_count = mutate_f64(self.seam_count, rng, rate, 1.0, 1.0, 16.0);
+        self.seam_sharpness = mutate_f64(self.seam_sharpness, rng, rate, 0.5, 0.5, 6.0);
+        self.brush_stretch = mutate_f64(self.brush_stretch, rng, rate, 1.5, 1.0, 20.0);
+        self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
+        self.metallic = mutate_f32(self.metallic, rng, rate, 0.1, 0.0, 1.0);
+        self.rust_level = mutate_f64(self.rust_level, rng, rate, 0.1, 0.0, 1.0);
+        self.color_metal = mutate_color3(self.color_metal, rng, rate, 0.07);
+        self.color_rust = mutate_color3(self.color_rust, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 6.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() { self.seed } else { other.seed },
+            style: if rng.random::<bool>() { self.style.clone() } else { other.style.clone() },
+            scale: if rng.random::<bool>() { self.scale } else { other.scale },
+            seam_count: if rng.random::<bool>() { self.seam_count } else { other.seam_count },
+            seam_sharpness: if rng.random::<bool>() {
+                self.seam_sharpness
+            } else {
+                other.seam_sharpness
+            },
+            brush_stretch: if rng.random::<bool>() {
+                self.brush_stretch
+            } else {
+                other.brush_stretch
+            },
+            roughness: if rng.random::<bool>() { self.roughness } else { other.roughness },
+            metallic: if rng.random::<bool>() { self.metallic } else { other.metallic },
+            rust_level: if rng.random::<bool>() { self.rust_level } else { other.rust_level },
+            color_metal: crossover_color3(self.color_metal, other.color_metal, rng),
+            color_rust: crossover_color3(self.color_rust, other.color_rust, rng),
+            normal_strength: if rng.random::<bool>() {
+                self.normal_strength
+            } else {
+                other.normal_strength
+            },
+        }
+    }
+}
+
+// --- PaversConfig -----------------------------------------------------------
+
+impl Genotype for PaversConfig {
+    fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+        self.seed = mutate_seed(self.seed, rng, rate);
+        if rng.random::<f32>() < rate {
+            self.layout = match self.layout {
+                crate::pavers::PaversLayout::Square => crate::pavers::PaversLayout::Hexagonal,
+                crate::pavers::PaversLayout::Hexagonal => crate::pavers::PaversLayout::Square,
+            };
+        }
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
+        self.aspect_ratio = mutate_f64(self.aspect_ratio, rng, rate, 0.2, 0.5, 3.0);
+        self.grout_width = mutate_f64(self.grout_width, rng, rate, 0.02, 0.01, 0.35);
+        self.bevel = mutate_f64(self.bevel, rng, rate, 0.15, 0.0, 1.0);
+        self.cell_variance = mutate_f64(self.cell_variance, rng, rate, 0.08, 0.0, 0.8);
+        self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
+        self.color_stone = mutate_color3(self.color_stone, rng, rate, 0.07);
+        self.color_grout = mutate_color3(self.color_grout, rng, rate, 0.07);
+        self.normal_strength = mutate_f32(self.normal_strength, rng, rate, 0.5, 0.5, 8.0);
+    }
+
+    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+        Self {
+            seed: if rng.random::<bool>() { self.seed } else { other.seed },
+            layout: if rng.random::<bool>() { self.layout.clone() } else { other.layout.clone() },
+            scale: if rng.random::<bool>() { self.scale } else { other.scale },
+            aspect_ratio: if rng.random::<bool>() {
+                self.aspect_ratio
+            } else {
+                other.aspect_ratio
+            },
+            grout_width: if rng.random::<bool>() { self.grout_width } else { other.grout_width },
+            bevel: if rng.random::<bool>() { self.bevel } else { other.bevel },
+            cell_variance: if rng.random::<bool>() {
+                self.cell_variance
+            } else {
+                other.cell_variance
+            },
+            roughness: if rng.random::<bool>() { self.roughness } else { other.roughness },
+            color_stone: crossover_color3(self.color_stone, other.color_stone, rng),
             color_grout: crossover_color3(self.color_grout, other.color_grout, rng),
             normal_strength: if rng.random::<bool>() {
                 self.normal_strength

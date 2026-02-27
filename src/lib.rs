@@ -25,15 +25,19 @@
 pub mod async_gen;
 pub mod bark;
 pub mod brick;
+pub mod concrete;
 pub mod generator;
 pub mod genetics;
 pub mod ground;
 pub mod leaf;
+pub mod metal;
 pub mod noise;
 pub mod normal;
+pub mod pavers;
 pub mod plank;
 pub mod rock;
 pub mod shingle;
+pub mod stucco;
 pub mod twig;
 pub mod window;
 
