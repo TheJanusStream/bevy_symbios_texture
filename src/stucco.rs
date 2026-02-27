@@ -94,8 +94,11 @@ impl TextureGenerator for StuccoGenerator {
             roughness_buf[ai + 3] = 255;
         }
 
+        // Scale the height map by roughness so the normal map also respects
+        // bump amplitude (not just the albedo interpolation above).
+        let heights_scaled: Vec<f64> = heights.iter().map(|&h| h * c.roughness).collect();
         let normal = height_to_normal(
-            &heights,
+            &heights_scaled,
             width,
             height,
             c.normal_strength * 0.5,

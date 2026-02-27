@@ -114,8 +114,10 @@ impl TextureGenerator for MetalGenerator {
             let v = y as f64 / h as f64;
 
             // Standing-seam ridge profile (sinusoidal bumps in V).
+            // seam_count must be an integer for the pattern to tile; round to nearest.
+            let seam_count = c.seam_count.round();
             let seam_h = if c.style == MetalStyle::StandingSeam {
-                let phase = (v * c.seam_count * TAU).sin();
+                let phase = (v * seam_count * TAU).sin();
                 // Raise to power to sharpen; clamp to [0,1].
                 phase.abs().powf(c.seam_sharpness.max(0.1)) * phase.signum() * 0.5 + 0.5
             } else {

@@ -95,7 +95,9 @@ impl TextureGenerator for BrickGenerator {
         let hx = (0.5 - c.mortar_size - bevel_r).max(0.0);
         let hy = (0.5 - c.mortar_size - bevel_r).max(0.0);
 
-        let cols = c.scale * c.aspect_ratio;
+        // Both row count and column count must be integers for the grid to tile.
+        let scale = c.scale.round();
+        let cols = (scale * c.aspect_ratio).round();
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -103,7 +105,7 @@ impl TextureGenerator for BrickGenerator {
 
         for y in 0..h {
             let v = y as f64 / h as f64;
-            let v_scaled = v * c.scale;
+            let v_scaled = v * scale;
             let row_id = v_scaled.floor();
             let v_frac = v_scaled.fract();
 

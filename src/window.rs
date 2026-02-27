@@ -112,30 +112,20 @@ impl TextureGenerator for WindowGenerator {
                 let u = x as f64 / w as f64;
                 let px = u - 0.5;
 
-                // Outer silhouette is a plain rectangle (r=0): fills every pixel
-                // of the card so the outer corners are always solid frame.
-                let outer_sdf = sdf_rounded_box(px, py, 0.5, 0.5, 0.0);
+                // The outer silhouette (r=0, half-extents 0.5) covers every pixel
+                // of the card: px,py ∈ [-0.5,0.5] so outer_sdf ≤ 0 always.
                 let inner_sdf =
                     sdf_rounded_box(px, py, inner_half - inner_r, inner_half - inner_r, inner_r);
 
                 let idx = y * w + x;
                 let ai = idx * 4;
 
-                if outer_sdf > 0.0 {
-                    // Background — fully transparent.
-                    heights[idx] = 0.0;
-                    albedo[ai] = 0;
-                    albedo[ai + 1] = 0;
-                    albedo[ai + 2] = 0;
-                    albedo[ai + 3] = 0;
-                    roughness_buf[ai] = 0;
-                    roughness_buf[ai + 1] = 0;
-                    roughness_buf[ai + 2] = 0;
-                    roughness_buf[ai + 3] = 0;
-                } else if inner_sdf > 0.0 {
+                if inner_sdf > 0.0 {
                     // Frame band between outer and inner SDF.
                     // Height ramps from 0 at the outer edge inward to 1 deep in the frame.
-                    let edge_t = ((-outer_sdf) / (c.frame_width + 0.005)).clamp(0.0, 1.0);
+                    // Distance from the nearest outer edge: min(0.5-|px|, 0.5-|py|).
+                    let edge_dist = (0.5 - px.abs()).min(0.5 - py.abs());
+                    let edge_t = (edge_dist / (c.frame_width + 0.005)).clamp(0.0, 1.0);
                     heights[idx] = edge_t;
 
                     albedo[ai] = linear_to_srgb(c.color_frame[0]);

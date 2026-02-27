@@ -82,9 +82,11 @@ impl TextureGenerator for PlankGenerator {
         // Anisotropic grain FBM (evaluated inline with custom coords).
         let grain_fbm: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(5);
         let grain_noise = ToroidalNoise::new(grain_fbm, 1.0);
+        // plank_count must be an integer for the grid to tile vertically.
+        let plank_count = c.plank_count.round();
         // Worley for knots.
         let worley = Worley::new(c.seed.wrapping_add(200)).set_return_type(ReturnType::Distance);
-        let knot_noise = ToroidalNoise::new(worley, c.plank_count * 1.5);
+        let knot_noise = ToroidalNoise::new(worley, plank_count * 1.5);
 
         let w = width as usize;
         let h = height as usize;
@@ -92,7 +94,7 @@ impl TextureGenerator for PlankGenerator {
 
         // Precompute knot Worley grid (isotropic, shared across planks).
         let knot_grid: Vec<f64> = {
-            let freq = c.plank_count * 1.5;
+            let freq = plank_count * 1.5;
             let col_cos: Vec<f64> = (0..w)
                 .map(|x| (TAU * x as f64 / w as f64).cos() * freq)
                 .collect();
@@ -125,7 +127,7 @@ impl TextureGenerator for PlankGenerator {
 
         for y in 0..h {
             let v = y as f64 / h as f64;
-            let v_scaled = v * c.plank_count;
+            let v_scaled = v * plank_count;
             let y_cell = v_scaled.floor() as i64;
             let v_frac = v_scaled.fract();
 

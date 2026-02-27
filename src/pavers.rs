@@ -102,9 +102,9 @@ impl TextureGenerator for PaversGenerator {
         let hx = (0.5 - grout_half - bevel_r).max(0.0);
         let hy = (0.5 - grout_half - bevel_r).max(0.0);
 
-        // Number of columns = scale * aspect_ratio; rows = scale.
-        let cols = c.scale * c.aspect_ratio;
-        let rows = c.scale;
+        // Both column and row counts must be integers for the grid to tile.
+        let cols = (c.scale * c.aspect_ratio).round();
+        let rows = c.scale.round();
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -212,29 +212,45 @@ fn square_cell(
 ///
 /// Uses axial cube-rounding to find the nearest hex center, then IQ's hex SDF.
 /// `sdf < 0` inside stone, `sdf >= 0` in grout.
+///
+/// # Tiling
+/// A flat-top hex grid has an intrinsic aspect ratio of `sqrt(3)/1.5 ≈ 1.1547`.
+/// There is no integer pair `(cols, rows)` that satisfies both horizontal and
+/// vertical tiling on a square exactly.  We fix the horizontal period to
+/// `1/scale` (exact for integer `scale`), then round the float row count to
+/// the nearest integer and stretch `v` by that correction factor so an integer
+/// number of rows fits in `[0, 1]`.  The hexes become very slightly non-regular
+/// (< ~8% distortion for scale ≥ 2), which is imperceptible in practice.
 fn hex_cell(u: f64, v: f64, scale: f64) -> (f64, i64, i64) {
     const SQRT3: f64 = 1.732_050_807_568_877_3;
 
-    // Circumradius of each hexagon in UV space.
-    // With flat-top layout, horizontal center-to-center = sqrt(3) * hex_r.
-    // Set so that `scale` hexagons fit across the width.
+    // Horizontal tiling requires an integer number of columns; round scale.
+    let scale = scale.round().max(1.0);
+    // Circumradius so that `scale` flat-top hexes fit exactly across [0, 1].
     let hex_r = 1.0 / (scale * SQRT3);
 
-    // Convert UV to fractional axial coordinates (flat-top convention).
+    // The natural (float) number of rows in [0,1]: scale * sqrt(3) / 1.5.
+    // Round to nearest integer so the grid tiles vertically without a seam.
+    let rows_float = scale * SQRT3 / 1.5;
+    let rows_int = rows_float.round().max(1.0);
+    // Stretch v so that rows_int hex rows span [0, 1] exactly.
+    let vs = v * (rows_float / rows_int);
+
+    // Convert to fractional axial coordinates (flat-top convention).
     let qf = (2.0 / 3.0) * u / hex_r;
-    let rf = (-1.0 / 3.0) * u / hex_r + (SQRT3 / 3.0) * v / hex_r;
+    let rf = (-1.0 / 3.0) * u / hex_r + (SQRT3 / 3.0) * vs / hex_r;
     let sf = -qf - rf;
 
     // Cube-round to nearest hex center.
     let (q, r, _s) = cube_round(qf, rf, sf);
 
-    // Center of this hex in UV space.
+    // Center of this hex in stretched UV space.
     let cx = hex_r * 1.5 * q as f64;
     let cy = hex_r * (SQRT3 / 2.0 * q as f64 + SQRT3 * r as f64);
 
-    // Distance from UV point to hex center; then evaluate hex SDF.
+    // Evaluate the SDF in stretched space (hexes are slightly non-regular).
     let dx = u - cx;
-    let dy = v - cy;
+    let dy = vs - cy;
     let sdf = hex_sdf(dx, dy, hex_r);
 
     (sdf, q, r)

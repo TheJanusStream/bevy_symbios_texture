@@ -450,7 +450,7 @@ impl Genotype for TwigConfig {
 impl Genotype for BrickConfig {
     fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
         self.seed = mutate_seed(self.seed, rng, rate);
-        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 12.0);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 12.0).round();
         self.row_offset = mutate_f64(self.row_offset, rng, rate, 0.1, 0.0, 1.0);
         self.aspect_ratio = mutate_f64(self.aspect_ratio, rng, rate, 0.3, 1.0, 4.0);
         self.mortar_size = mutate_f64(self.mortar_size, rng, rate, 0.03, 0.01, 0.35);
@@ -588,7 +588,7 @@ impl Genotype for WindowConfig {
 impl Genotype for PlankConfig {
     fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
         self.seed = mutate_seed(self.seed, rng, rate);
-        self.plank_count = mutate_f64(self.plank_count, rng, rate, 1.0, 2.0, 12.0);
+        self.plank_count = mutate_f64(self.plank_count, rng, rate, 1.0, 2.0, 12.0).round();
         self.grain_scale = mutate_f64(self.grain_scale, rng, rate, 2.0, 4.0, 24.0);
         self.joint_width = mutate_f64(self.joint_width, rng, rate, 0.02, 0.01, 0.25);
         self.stagger = mutate_f64(self.stagger, rng, rate, 0.15, 0.0, 1.0);
@@ -652,7 +652,7 @@ impl Genotype for PlankConfig {
 impl Genotype for ShingleConfig {
     fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
         self.seed = mutate_seed(self.seed, rng, rate);
-        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 2.0, 12.0);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 2.0, 12.0).round();
         self.shape_profile = mutate_f64(self.shape_profile, rng, rate, 0.2, 0.0, 1.0);
         self.overlap = mutate_f64(self.overlap, rng, rate, 0.1, 0.0, 0.8);
         self.stagger = mutate_f64(self.stagger, rng, rate, 0.15, 0.0, 1.0);
@@ -743,7 +743,7 @@ impl Genotype for ConcreteConfig {
         self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
         self.octaves = mutate_usize(self.octaves, rng, rate, 1, 10);
         self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
-        self.formwork_lines = mutate_f64(self.formwork_lines, rng, rate, 1.0, 0.0, 12.0);
+        self.formwork_lines = mutate_f64(self.formwork_lines, rng, rate, 1.0, 0.0, 12.0).round();
         self.formwork_depth = mutate_f64(self.formwork_depth, rng, rate, 0.05, 0.0, 0.5);
         self.pit_density = mutate_f64(self.pit_density, rng, rate, 0.04, 0.0, 0.45);
         self.color_base = mutate_color3(self.color_base, rng, rate, 0.07);
@@ -792,7 +792,7 @@ impl Genotype for MetalConfig {
             };
         }
         self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
-        self.seam_count = mutate_f64(self.seam_count, rng, rate, 1.0, 1.0, 16.0);
+        self.seam_count = mutate_f64(self.seam_count, rng, rate, 1.0, 1.0, 16.0).round();
         self.seam_sharpness = mutate_f64(self.seam_sharpness, rng, rate, 0.5, 0.5, 6.0);
         self.brush_stretch = mutate_f64(self.brush_stretch, rng, rate, 1.5, 1.0, 20.0);
         self.roughness = mutate_f64(self.roughness, rng, rate, 0.1, 0.0, 1.0);
@@ -844,7 +844,7 @@ impl Genotype for PaversConfig {
                 crate::pavers::PaversLayout::Hexagonal => crate::pavers::PaversLayout::Square,
             };
         }
-        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0);
+        self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 16.0).round();
         self.aspect_ratio = mutate_f64(self.aspect_ratio, rng, rate, 0.2, 0.5, 3.0);
         self.grout_width = mutate_f64(self.grout_width, rng, rate, 0.02, 0.01, 0.35);
         self.bevel = mutate_f64(self.bevel, rng, rate, 0.15, 0.0, 1.0);

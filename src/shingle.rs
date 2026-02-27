@@ -97,9 +97,12 @@ impl TextureGenerator for ShingleGenerator {
         let mut albedo = vec![0u8; n * 4];
         let mut roughness_buf = vec![0u8; n * 4];
 
+        // scale must be an integer for the grid to tile; round to nearest.
+        let scale = c.scale.round();
+
         for y in 0..h {
             let v = y as f64 / h as f64;
-            let v_scaled = v * c.scale;
+            let v_scaled = v * scale;
             let row_id = v_scaled.floor() as i64;
             let v_frac = v_scaled.fract(); // 0 = bottom of cell, 1 = top
 
@@ -108,8 +111,8 @@ impl TextureGenerator for ShingleGenerator {
 
                 // Stagger: shift U by row_id × stagger so alternate rows offset.
                 let u_stagger = (u + row_id as f64 * c.stagger).rem_euclid(1.0);
-                let col_id = (u_stagger * c.scale).floor() as i64;
-                let u_frac = (u_stagger * c.scale).fract(); // 0..1 within shingle cell
+                let col_id = (u_stagger * scale).floor() as i64;
+                let u_frac = (u_stagger * scale).fract(); // 0..1 within shingle cell
 
                 // Per-shingle colour variance hash.
                 let cv = cell_hash(col_id, row_id, c.seed);

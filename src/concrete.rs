@@ -99,8 +99,10 @@ impl TextureGenerator for ConcreteGenerator {
             let v = y as f64 / h as f64;
 
             // Formwork lines: thin cosine groove repeated `formwork_lines` times in V.
-            let line_groove = if c.formwork_lines > 0.01 {
-                let phase = (v * c.formwork_lines * TAU).cos();
+            // Must be an integer count for the pattern to tile; round to nearest.
+            let formwork_lines = c.formwork_lines.round();
+            let line_groove = if formwork_lines > 0.0 {
+                let phase = (v * formwork_lines * TAU).cos();
                 // Groove deepest where phase = +1 (peaks), shallow elsewhere.
                 ((phase * 0.5 + 0.5) * c.formwork_depth).clamp(0.0, 1.0)
             } else {
