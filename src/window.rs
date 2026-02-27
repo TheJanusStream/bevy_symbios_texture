@@ -1,8 +1,9 @@
 //! Window texture generator using 2-D signed distance functions (SDF).
 //!
 //! The algorithm:
-//! 1. Compute outer-frame and inner-glass rounded-box SDFs.
-//! 2. Classify each pixel as background (transparent), frame, mullion, or glass.
+//! 1. Compute a plain rectangular outer silhouette (full card) and a
+//!    rounded-box SDF for the inner glass opening.
+//! 2. Classify each pixel as frame, mullion, or glass.
 //! 3. Subdivide the glass region into `panes_x × panes_y` panes separated by
 //!    mullions using fractional UV within the inner glass area.
 //! 4. Add FBM grime noise to the glass surface and roughness map.
@@ -27,7 +28,8 @@ pub struct WindowConfig {
     pub panes_y: usize,
     /// Mullion/muntin thickness as a fraction of the glass area \[0, 0.2\].
     pub mullion_thickness: f64,
-    /// Outer corner-rounding radius as a fraction of the card \[0, 0.4\].
+    /// Inner (glass-opening) corner-rounding radius as a fraction of the card \[0, 0.4\].
+    /// The outer silhouette is always a plain rectangle.
     pub corner_radius: f64,
     /// Glass opacity \[0 = clear, 1 = frosted/opaque\].
     pub glass_opacity: f64,
@@ -87,8 +89,8 @@ impl TextureGenerator for WindowGenerator {
         // Inner half-extent = outer half-extent (0.5) minus frame.
         let inner_half = 0.5 - c.frame_width;
         // Inner corner radius: keep at least a small value so the SDF is well-formed.
+        // The outer silhouette is a plain rectangle — only the inner opening is rounded.
         let inner_r = c.corner_radius.min(inner_half * 0.9).max(0.005);
-        let outer_r = c.corner_radius.min(0.49);
 
         // Glass area extent in UV for pane subdivision.
         let glass_span = inner_half * 2.0; // UV span of glass region (centered)
@@ -110,7 +112,9 @@ impl TextureGenerator for WindowGenerator {
                 let u = x as f64 / w as f64;
                 let px = u - 0.5;
 
-                let outer_sdf = sdf_rounded_box(px, py, 0.5 - outer_r, 0.5 - outer_r, outer_r);
+                // Outer silhouette is a plain rectangle (r=0): fills every pixel
+                // of the card so the outer corners are always solid frame.
+                let outer_sdf = sdf_rounded_box(px, py, 0.5, 0.5, 0.0);
                 let inner_sdf =
                     sdf_rounded_box(px, py, inner_half - inner_r, inner_half - inner_r, inner_r);
 

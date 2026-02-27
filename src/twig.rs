@@ -50,6 +50,10 @@ const SYMPODIAL_ZZ_SCALE: f64 = 1.5;
 /// Power used to taper stem width: 1.0 = linear, < 1.0 = wider for longer.
 const STEM_TAPER_POW: f64 = 0.55;
 
+/// Stem half-width at the mid-internode as a fraction of the local tapered width.
+/// Controls how narrow the stem is between knots; lower = more knobbly.
+const INTERNODE_WIDTH: f64 = 0.45;
+
 /// Scale of the terminal leaf relative to lateral leaves.
 const TERMINAL_SCALE: f64 = 0.72;
 
@@ -90,7 +94,7 @@ impl Default for TwigConfig {
     fn default() -> Self {
         Self {
             leaf: LeafConfig::default(),
-            stem_color: [0.16, 0.07, 0.06],
+            stem_color: [0.18, 0.08, 0.06],
             stem_half_width: 0.021,
             leaf_pairs: 4,
             leaf_angle: FRAC_PI_2 - 0.35, // ≈ 70° — slightly below perpendicular, drooping
@@ -267,6 +271,9 @@ impl TextureGenerator for TwigGenerator {
         // The terminal leaf caps the stem; suppress stem rendering above it.
         let term_v = terminal_v(c);
 
+        // Node V-positions used to shape the knobbly segments.
+        let node_vs = leaf_node_vs(c);
+
         let mut heights = vec![0.5f64; n];
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
@@ -274,9 +281,11 @@ impl TextureGenerator for TwigGenerator {
         for y in 0..h {
             let pv = (y as f64 + 0.5) / h as f64;
 
-            // Stem centerline and tapered half-width for this scanline.
+            // Stem centerline, tapered half-width, and knobbly segment factor.
             let s_center = stem_center_u(pv, c, &stem_perlin);
             let s_hw = stem_half_width_at(pv, c.stem_half_width);
+            let seg_f = stem_segment_factor(pv, &node_vs);
+            let eff_hw = s_hw * seg_f;
 
             for x in 0..w {
                 let pu = (x as f64 + 0.5) / w as f64;
@@ -317,10 +326,13 @@ impl TextureGenerator for TwigGenerator {
                 // Do not draw the stem above the terminal leaf attachment: the
                 // terminal leaf covers that region intentionally, and the bare
                 // stem tip would visibly pierce through the apex leaf.
-                if s_hw > 1e-9 && dist_to_stem < s_hw && pv >= term_v {
-                    // Bright ridge at the stem centre.
-                    let t = 1.0 - (dist_to_stem / s_hw) as f32;
-                    heights[idx] = t as f64 * 0.6;
+                // eff_hw modulates the cross-section width per segment so the
+                // stem appears as a chain of knobbly segments joined at nodes.
+                if s_hw > 1e-9 && dist_to_stem < eff_hw && pv >= term_v {
+                    // Bright ridge at the stem centre; height encodes both the
+                    // cross-sectional round profile and the segment bulge shape.
+                    let t = (1.0 - dist_to_stem / eff_hw) as f32;
+                    heights[idx] = t as f64 * seg_f * 0.8;
 
                     albedo[ai] = linear_to_srgb(lerp(c.stem_color[0] * 0.55, c.stem_color[0], t));
                     albedo[ai + 1] =
@@ -422,6 +434,53 @@ fn stem_center_u(pv: f64, config: &TwigConfig, perlin: &Perlin) -> f64 {
 /// `pv = 0` (tip) → zero width; `pv = 1` (base) → `half_width`.
 fn stem_half_width_at(pv: f64, half_width: f64) -> f64 {
     half_width * pv.powf(STEM_TAPER_POW)
+}
+
+/// V positions of each inter-segment node along the stem.
+///
+/// Nodes coincide with the leaf-attachment V positions so that the knobbly
+/// constrictions fall exactly at the peaks and valleys of the sympodial zigzag
+/// (or at the regular internode positions in monopodial mode).
+fn leaf_node_vs(config: &TwigConfig) -> Vec<f64> {
+    let term_v = terminal_v(config);
+    let lat_start = term_v + 0.05;
+    let lat_span = 0.88 - lat_start;
+    let n = config.leaf_pairs.max(1);
+    let mut vs = Vec::with_capacity(n + 1);
+    vs.push(term_v);
+    for i in 0..n {
+        let k = i as f64;
+        let normalized = if config.sympodial {
+            // Sine extrema — matches sympodial_attachments exactly.
+            (2.0 * k + 1.0) / (2.0 * n as f64)
+        } else {
+            // Evenly spaced — matches monopodial_attachments exactly.
+            k / n as f64
+        };
+        vs.push(lat_start + normalized * lat_span);
+    }
+    vs
+}
+
+/// Width-modulation factor for the stem at V position `pv`.
+///
+/// Returns a value in `[INTERNODE_WIDTH, 1.0]`:
+/// * Peaks at `1.0` at each node joint — the swollen knot where a leaf attaches.
+/// * Dips to `INTERNODE_WIDTH` at the mid-point between nodes (the internode).
+/// * Below the last node the stem stays at full width toward the base.
+fn stem_segment_factor(pv: f64, node_vs: &[f64]) -> f64 {
+    let n = node_vs.len();
+    // Find the segment [lo, hi] that brackets pv.
+    for i in 0..n.saturating_sub(1) {
+        if pv <= node_vs[i + 1] + 1e-9 {
+            let t = ((pv - node_vs[i]) / (node_vs[i + 1] - node_vs[i])).clamp(0.0, 1.0);
+            // cos²(t·π): 1 at both node ends, 0 at the internode midpoint.
+            let c = (t * PI).cos();
+            return INTERNODE_WIDTH + (1.0 - INTERNODE_WIDTH) * c * c;
+        }
+    }
+    // Base region (below the last node): full width toward the attachment base.
+    1.0
 }
 
 /// Angle of the stem tangent at `pv` from the downward direction (`+V`),
