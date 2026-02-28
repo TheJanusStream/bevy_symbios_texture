@@ -379,7 +379,9 @@ pub fn brick_config_editor(ui: &mut egui::Ui, cfg: &mut BrickConfig, id: egui::I
             u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.scale, 1.0..=16.0).step_by(1.0).text("Scale (Rows)"),
+                egui::Slider::new(&mut cfg.scale, 1.0..=16.0)
+                    .step_by(1.0)
+                    .text("Scale (Rows)"),
                 &mut wb,
                 &mut regen,
             );
@@ -447,7 +449,9 @@ pub fn plank_config_editor(ui: &mut egui::Ui, cfg: &mut PlankConfig, id: egui::I
             u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.plank_count, 1.0..=16.0).step_by(1.0).text("Plank Count"),
+                egui::Slider::new(&mut cfg.plank_count, 1.0..=16.0)
+                    .step_by(1.0)
+                    .text("Plank Count"),
                 &mut wb,
                 &mut regen,
             );
@@ -519,7 +523,9 @@ pub fn shingle_config_editor(
             u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.scale, 2.0..=16.0).step_by(1.0).text("Scale (Rows)"),
+                egui::Slider::new(&mut cfg.scale, 2.0..=16.0)
+                    .step_by(1.0)
+                    .text("Scale (Rows)"),
                 &mut wb,
                 &mut regen,
             );
@@ -585,7 +591,13 @@ pub fn stucco_config_editor(
                 &mut regen,
             );
             color_instant(ui, "Base Color", &mut cfg.color_base, &mut wb, &mut regen);
-            color_instant(ui, "Shadow Color", &mut cfg.color_shadow, &mut wb, &mut regen);
+            color_instant(
+                ui,
+                "Shadow Color",
+                &mut cfg.color_shadow,
+                &mut wb,
+                &mut regen,
+            );
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
@@ -623,7 +635,9 @@ pub fn concrete_config_editor(
             );
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.formwork_lines, 0.0..=12.0).step_by(1.0).text("Formwork Lines"),
+                egui::Slider::new(&mut cfg.formwork_lines, 0.0..=12.0)
+                    .step_by(1.0)
+                    .text("Formwork Lines"),
                 &mut wb,
                 &mut regen,
             );
@@ -652,11 +666,7 @@ pub fn concrete_config_editor(
 }
 
 /// Renders all [`MetalConfig`] parameters inside a collapsing header.
-pub fn metal_config_editor(
-    ui: &mut egui::Ui,
-    cfg: &mut MetalConfig,
-    id: egui::Id,
-) -> (bool, bool) {
+pub fn metal_config_editor(ui: &mut egui::Ui, cfg: &mut MetalConfig, id: egui::Id) -> (bool, bool) {
     let mut wb = false;
     let mut regen = false;
     egui::CollapsingHeader::new("Metal Config")
@@ -687,7 +697,9 @@ pub fn metal_config_editor(
             );
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.seam_count, 1.0..=16.0).step_by(1.0).text("Seam Count"),
+                egui::Slider::new(&mut cfg.seam_count, 1.0..=16.0)
+                    .step_by(1.0)
+                    .text("Seam Count"),
                 &mut wb,
                 &mut regen,
             );
@@ -763,7 +775,9 @@ pub fn pavers_config_editor(
             });
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.scale, 1.0..=16.0).step_by(1.0).text("Scale"),
+                egui::Slider::new(&mut cfg.scale, 1.0..=16.0)
+                    .step_by(1.0)
+                    .text("Scale"),
                 &mut wb,
                 &mut regen,
             );

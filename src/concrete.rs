@@ -82,8 +82,9 @@ impl TextureGenerator for ConcreteGenerator {
         let surf = sample_grid(&surf_noise, width, height);
 
         // High-frequency pit noise — separate seed.
-        let fbm_pit: Fbm<Perlin> =
-            Fbm::new(c.seed.wrapping_add(77)).set_octaves(3).set_frequency(2.0);
+        let fbm_pit: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(77))
+            .set_octaves(3)
+            .set_frequency(2.0);
         let pit_noise = ToroidalNoise::new(fbm_pit, c.scale * 4.0);
         let pits = sample_grid(&pit_noise, width, height);
 
@@ -147,10 +148,21 @@ impl TextureGenerator for ConcreteGenerator {
             }
         }
 
-        let normal =
-            height_to_normal(&heights, width, height, c.normal_strength, BoundaryMode::Wrap);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.normal_strength,
+            BoundaryMode::Wrap,
+        );
 
-        Ok(TextureMap { albedo, normal, roughness: roughness_buf, width, height })
+        Ok(TextureMap {
+            albedo,
+            normal,
+            roughness: roughness_buf,
+            width,
+            height,
+        })
     }
 }
 

@@ -105,7 +105,13 @@ impl TextureGenerator for StuccoGenerator {
             BoundaryMode::Wrap,
         );
 
-        Ok(TextureMap { albedo, normal, roughness: roughness_buf, width, height })
+        Ok(TextureMap {
+            albedo,
+            normal,
+            roughness: roughness_buf,
+            width,
+            height,
+        })
     }
 }
 

@@ -119,12 +119,8 @@ impl TextureGenerator for PaversGenerator {
                 let raw_surf = normalize(surf_grid[idx]);
 
                 let (sdf_val, cell_id_u, cell_id_v) = match c.layout {
-                    PaversLayout::Square => {
-                        square_cell(u, v, cols, rows, hx, hy, bevel_r)
-                    }
-                    PaversLayout::Hexagonal => {
-                        hex_cell(u, v, c.scale)
-                    }
+                    PaversLayout::Square => square_cell(u, v, cols, rows, hx, hy, bevel_r),
+                    PaversLayout::Hexagonal => hex_cell(u, v, c.scale),
                 };
 
                 let h_val;
@@ -169,10 +165,21 @@ impl TextureGenerator for PaversGenerator {
             }
         }
 
-        let normal =
-            height_to_normal(&heights, width, height, c.normal_strength, BoundaryMode::Wrap);
+        let normal = height_to_normal(
+            &heights,
+            width,
+            height,
+            c.normal_strength,
+            BoundaryMode::Wrap,
+        );
 
-        Ok(TextureMap { albedo, normal, roughness: roughness_buf, width, height })
+        Ok(TextureMap {
+            albedo,
+            normal,
+            roughness: roughness_buf,
+            width,
+            height,
+        })
     }
 }
 
@@ -200,8 +207,7 @@ fn square_cell(
     // Rounded-box SDF: negative inside, positive outside.
     let dx = cx.abs() - hx;
     let dy = cy.abs() - hy;
-    let sdf =
-        (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - bevel_r;
+    let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - bevel_r;
 
     (sdf, cell_u, cell_v)
 }
@@ -260,8 +266,11 @@ fn hex_cell(u: f64, v: f64, scale: f64) -> (f64, i64, i64) {
 #[inline]
 fn cube_round(qf: f64, rf: f64, sf: f64) -> (i64, i64, i64) {
     let (rq, rr, rs) = (qf.round() as i64, rf.round() as i64, sf.round() as i64);
-    let (dq, dr, ds) =
-        ((rq as f64 - qf).abs(), (rr as f64 - rf).abs(), (rs as f64 - sf).abs());
+    let (dq, dr, ds) = (
+        (rq as f64 - qf).abs(),
+        (rr as f64 - rf).abs(),
+        (rs as f64 - sf).abs(),
+    );
     if dq > dr && dq > ds {
         (-rr - rs, rr, rs)
     } else if dr > ds {
