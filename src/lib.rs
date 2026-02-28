@@ -2,20 +2,25 @@
 //!
 //! # Generators
 //!
-//! **Tileable surface textures** (bark, rock, ground): wrap seamlessly via
-//! toroidal 4-D noise mapping.  Upload with [`map_to_images`] to get
-//! repeat-wrapping samplers.
+//! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
+//! metal, shingle, pavers, stucco): wrap seamlessly via toroidal 4-D noise
+//! mapping.  Upload with [`map_to_images`] to get repeat-wrapping samplers.
 //!
-//! **Foliage cards** (leaf, twig): produce alpha-masked silhouettes that must
-//! not tile.  Upload with [`map_to_images_card`] to get clamp-to-edge samplers.
+//! **Alpha-masked cards** (leaf, twig, window): produce silhouettes with
+//! per-pixel alpha that must not tile.  Upload with [`map_to_images_card`] to
+//! get clamp-to-edge samplers.
 //!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
-//! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness).
+//! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness/ORM).
 //!
 //! Seamless tiling for surface textures is guaranteed by the [`ToroidalNoise`]
 //! wrapper, which maps 2-D UV coordinates to a 4-D torus so noise wraps at
 //! every edge with no seam.
+//!
+//! Both upload functions generate a full mipmap chain with type-correct
+//! averaging: sRGB-linear averaging for albedo, renormalized averaging for
+//! normal maps, and direct linear averaging for ORM maps.
 //!
 //! # Genetics
 //! All config types implement `symbios_genetics::Genotype` (see [`genetics`]),

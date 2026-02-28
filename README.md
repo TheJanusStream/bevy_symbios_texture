@@ -4,20 +4,23 @@ Procedural, tileable texture generation for [Bevy](https://bevyengine.org/).
 
 Generates albedo, normal, and roughness (ORM) maps entirely on the CPU — no
 asset files required. All surface textures are seamlessly tileable by
-construction via toroidal 4-D noise mapping. Foliage cards (leaf, twig) produce
-alpha-masked silhouettes and do not tile.
+construction via toroidal 4-D noise mapping. Alpha-masked card textures (leaf,
+twig, window) produce per-pixel transparency and do not tile.
 
 ## Bevy compatibility
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.2                  | 0.18 |
+| 0.3                  | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.2"
+bevy_symbios_texture = "0.3"
+
+# Optional: egui editor panel (required for the texture_viewer example)
+bevy_symbios_texture = { version = "0.3", features = ["egui"] }
 ```
 
 ## Quick start
@@ -49,8 +52,9 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 ### Asynchronous (non-blocking, recommended)
 
-Offloads pixel math to Bevy's `AsyncComputeTaskPool` so the main thread is
-never stalled.
+Offloads pixel math to a private, bounded rayon thread pool (capped at 4
+concurrent tasks) so the main thread is never stalled. On WASM, falls back to
+Bevy's `AsyncComputeTaskPool`.
 
 ```rust
 use bevy::prelude::*;
@@ -84,11 +88,14 @@ fn on_ready(
 }
 ```
 
+Dropping a `PendingTexture` entity before generation completes sets a
+cancellation flag; tasks that have not yet started exit without doing any work.
+
 ## Generators
 
 ### Surface textures (tileable)
 
-All three tileable generators produce three seamlessly-repeating maps:
+All tileable generators produce three seamlessly-repeating maps:
 
 | Map        | Format           | Contents                                  |
 |------------|------------------|-------------------------------------------|
@@ -160,11 +167,165 @@ let config = GroundConfig {
 };
 ```
 
-### Foliage cards (alpha-masked)
+#### Brick
 
-Foliage generators produce an RGBA8 texture where `albedo.alpha` encodes the
-silhouette (`0` = outside, `255` = inside).  Upload with [`map_to_images_card`]
-so the sampler does not tile and the alpha channel does not bleed at edges.
+Grid-based SDF with per-cell colour hashing and configurable mortar/bonding pattern.
+
+```rust
+use bevy_symbios_texture::brick::BrickConfig;
+
+let config = BrickConfig {
+    seed: 42,
+    scale: 4.0,          // number of brick rows across the tile
+    row_offset: 0.5,     // 0.0 = stack bond, 0.5 = running bond, 0.333 = third bond
+    aspect_ratio: 2.0,   // brick width-to-height ratio
+    mortar_size: 0.10,   // mortar gap as a fraction of cell height [0, 0.4]
+    bevel: 0.5,          // corner bevel radius as a fraction of mortar_size [0, 1]
+    cell_variance: 0.12, // per-brick colour jitter [0, 1]
+    roughness: 0.25,     // surface pitting noise intensity [0, 1]
+    color_brick:  [0.56, 0.28, 0.18],
+    color_mortar: [0.76, 0.73, 0.67],
+    normal_strength: 4.0,
+};
+```
+
+#### Plank
+
+Anisotropic grain FBM with domain warp, Worley knots, and horizontal joint gaps.
+Each plank row has an independent de-correlated grain phase.
+
+```rust
+use bevy_symbios_texture::plank::PlankConfig;
+
+let config = PlankConfig {
+    seed: 42,
+    plank_count: 5.0,     // number of planks visible vertically
+    grain_scale: 12.0,    // controls how fine the grain lines are
+    joint_width: 0.06,    // gap between planks as a fraction of plank height [0, 0.3]
+    stagger: 0.5,         // horizontal stagger of end-joints [0, 1]
+    knot_density: 0.25,   // fraction of cells that contain a Worley knot [0, 1]
+    grain_warp: 0.35,     // domain-warp strength that bends grain lines [0, 1]
+    color_wood_light: [0.72, 0.52, 0.30],
+    color_wood_dark:  [0.42, 0.26, 0.12],
+    normal_strength: 2.5,
+};
+```
+
+#### Concrete
+
+Smooth FBM surface relief with optional horizontal formwork-panel seams and
+scattered air-pocket pits.
+
+```rust
+use bevy_symbios_texture::concrete::ConcreteConfig;
+
+let config = ConcreteConfig {
+    seed: 17,
+    scale: 5.0,
+    octaves: 5,
+    roughness: 0.45,          // overall bump amplitude [0, 1]
+    formwork_lines: 4.0,      // number of horizontal panel seams [0 = none]
+    formwork_depth: 0.12,     // groove depth of seams [0, 1]
+    pit_density: 0.08,        // air-pocket density [0, 0.5]
+    color_base: [0.55, 0.54, 0.52],
+    color_pit:  [0.35, 0.34, 0.33],
+    normal_strength: 2.5,
+};
+```
+
+#### Metal
+
+Brushed-metal (anisotropic FBM scratches) or standing-seam roof panels, with
+optional rust-patch weathering.
+
+```rust
+use bevy_symbios_texture::metal::{MetalConfig, MetalStyle};
+
+let config = MetalConfig {
+    seed: 31,
+    style: MetalStyle::Brushed, // or MetalStyle::StandingSeam
+    scale: 6.0,
+    seam_count: 6.0,      // StandingSeam: number of ridges across the tile
+    seam_sharpness: 2.5,  // StandingSeam: 0.5 = sinusoidal, 4.0 = sharp
+    brush_stretch: 8.0,   // Brushed: anisotropy (higher = longer horizontal scratches)
+    roughness: 0.25,      // micro-roughness amplitude [0, 1]
+    metallic: 0.85,       // metallic value for clean areas [0, 1]
+    rust_level: 0.15,     // rust-patch coverage [0 = none, 1 = heavy]
+    color_metal: [0.42, 0.44, 0.47],
+    color_rust:  [0.42, 0.24, 0.12],
+    normal_strength: 3.0,
+};
+```
+
+#### Shingle
+
+Overlapping roof shingles or tiles with configurable profile shape, moss growth,
+and staggered bonding.
+
+```rust
+use bevy_symbios_texture::shingle::ShingleConfig;
+
+let config = ShingleConfig {
+    seed: 42,
+    scale: 5.0,           // number of shingle rows across the tile
+    shape_profile: 0.5,   // 0.0 = square/flat, 1.0 = scalloped (half-circle cut)
+    overlap: 0.45,        // fraction of each shingle hidden under the row above [0, 0.8]
+    stagger: 0.5,         // horizontal stagger of alternate rows [0, 1]
+    moss_level: 0.18,     // moss/algae growth on the lower exposed edge [0, 1]
+    color_tile:  [0.40, 0.25, 0.18],
+    color_grout: [0.18, 0.14, 0.12],
+    normal_strength: 5.0,
+};
+```
+
+#### Pavers
+
+Square or flat-top hexagonal paving stones with grout joints, per-stone colour
+variance, and a rounded-box SDF bevel.
+
+```rust
+use bevy_symbios_texture::pavers::{PaversConfig, PaversLayout};
+
+let config = PaversConfig {
+    seed: 23,
+    scale: 5.0,           // roughly the number of pavers across the tile
+    aspect_ratio: 1.0,    // width-to-height ratio for Square layout (ignored for Hexagonal)
+    grout_width: 0.08,    // grout gap as a fraction of stone size [0, 0.4]
+    bevel: 0.5,           // corner bevel radius as a fraction of grout half-width [0, 1]
+    cell_variance: 0.10,  // per-paver colour jitter [0, 1]
+    roughness: 0.30,      // surface FBM micro-detail amplitude [0, 1]
+    color_stone: [0.48, 0.44, 0.40],
+    color_grout: [0.28, 0.27, 0.26],
+    layout: PaversLayout::Square, // or PaversLayout::Hexagonal
+    normal_strength: 3.5,
+};
+```
+
+#### Stucco
+
+High-frequency FBM bumps over a flat matte base — typical of sand-float or
+pebble-dash exterior render.  Entirely matte with zero metallic response.
+
+```rust
+use bevy_symbios_texture::stucco::StuccoConfig;
+
+let config = StuccoConfig {
+    seed: 13,
+    scale: 8.0,       // bump density (higher = finer texture)
+    octaves: 6,
+    roughness: 0.35,  // bump amplitude / surface relief depth [0, 1]
+    color_base:   [0.92, 0.89, 0.84],
+    color_shadow: [0.72, 0.70, 0.66],
+    normal_strength: 2.0,
+};
+```
+
+### Alpha-masked cards
+
+Card generators produce an RGBA8 texture where `albedo.alpha` encodes the
+silhouette (`0` = fully transparent, `255` = fully opaque).  Upload with
+[`map_to_images_card`] so the sampler does not tile and the alpha silhouette
+does not bleed at edges.
 
 #### Leaf
 
@@ -233,6 +394,29 @@ let config = TwigConfig {
 };
 ```
 
+#### Window
+
+An SDF-based window card with configurable frame, mullions/muntins, and
+per-pane glass.  The alpha channel is transparent outside the frame and
+semi-transparent over glass panes.
+
+```rust
+use bevy_symbios_texture::window::WindowConfig;
+
+let config = WindowConfig {
+    seed: 42,
+    frame_width: 0.08,       // frame width as a fraction of the card [0, 0.4]
+    panes_x: 2,              // number of panes horizontally
+    panes_y: 3,              // number of panes vertically
+    mullion_thickness: 0.025, // mullion/muntin thickness as a fraction of the glass area
+    corner_radius: 0.02,     // inner glass-opening corner rounding [0, 0.4]
+    glass_opacity: 0.30,     // glass alpha [0 = clear, 1 = frosted/opaque]
+    grime_level: 0.15,       // grime/dirt noise on glass [0, 1]
+    color_frame: [0.85, 0.82, 0.78],
+    normal_strength: 3.0,
+};
+```
+
 ## Evolutionary parameter search (genetics)
 
 All config types implement `symbios_genetics::Genotype`, making them
@@ -255,19 +439,27 @@ let parent_b = BarkConfig { seed: 99, ..BarkConfig::default() };
 let child = config.crossover(&parent_b, &mut rng);
 ```
 
-The `texture_viewer` example uses this to mutate any displayed panel when you
-click it.
+The `texture_viewer` example uses this to mutate any displayed material when
+you click **Mutate**.
 
 ## Architecture
 
 ```
 TextureGenerator (trait)
     │
-    ├── BarkGenerator   ─── ToroidalNoise (domain-warped FBM + Worley plates)
-    ├── RockGenerator   ─── ToroidalNoise (RidgedMulti)
-    ├── GroundGenerator ─── ToroidalNoise × 2 (dual-scale FBM)
-    ├── LeafGenerator   ─── LeafSampler (silhouette + venation)
-    └── TwigGenerator   ─── LeafSampler × N (composite stem + leaves)
+    ├── BarkGenerator    ─── ToroidalNoise (domain-warped FBM + Worley plates)
+    ├── RockGenerator    ─── ToroidalNoise (RidgedMulti)
+    ├── GroundGenerator  ─── ToroidalNoise × 2 (dual-scale FBM)
+    ├── BrickGenerator   ─── ToroidalNoise FBM + rounded-box SDF grid
+    ├── PlankGenerator   ─── ToroidalNoise FBM + Worley knots (anisotropic)
+    ├── ConcreteGenerator─── ToroidalNoise FBM + cosine formwork + pit FBM
+    ├── MetalGenerator   ─── ToroidalNoise FBM (brushed/standing-seam) + rust FBM
+    ├── ShingleGenerator ─── ToroidalNoise FBM + sawtooth overlap ramp
+    ├── PaversGenerator  ─── ToroidalNoise FBM + square/hex SDF grid
+    ├── StuccoGenerator  ─── ToroidalNoise FBM (high-frequency, matte)
+    ├── LeafGenerator    ─── LeafSampler (silhouette + venation)
+    ├── TwigGenerator    ─── LeafSampler × N (composite stem + leaves)
+    └── WindowGenerator  ─── rounded-box SDF frame/mullions + FBM grime
                                 │
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
@@ -276,6 +468,8 @@ TextureGenerator (trait)
                                 │
                 map_to_images()      → GeneratedHandles (repeat sampler)
                 map_to_images_card() → GeneratedHandles (clamp sampler)
+                                │
+                        full mipmap chain (type-correct averaging)
 ```
 
 **Seamless tiling** is provided by [`ToroidalNoise`], which maps 2-D UV
@@ -292,10 +486,10 @@ Because `cos(0) = cos(2π)` and `sin(0) = sin(2π)`, `u=0` and `u=1` always
 resolve to the same 4-D point, guaranteeing zero-seam tiling.
 
 **Normal maps** are derived from the height field via central-difference
-gradients.  For the tileable surface textures (Bark, Rock, Ground) the
-neighbours wrap toroidally, so the normals are also seamless.  For foliage
-cards (Leaf, Twig) the boundary uses clamp-to-edge so normals do not bleed
-across the transparent silhouette border.
+gradients.  For the tileable surface textures the neighbours wrap toroidally,
+so the normals are also seamless.  For card textures (Leaf, Twig, Window) the
+boundary uses clamp-to-edge so normals do not bleed across the transparent
+silhouette border.
 
 **Colour encoding** uses a 4096-entry sRGB lookup table (built once via
 `OnceLock`) to avoid repeated `f32::powf` calls during rasterisation.
@@ -303,15 +497,24 @@ A 256-entry table would be insufficient because the sRGB curve is steep
 near zero; 4096 bins keep the maximum quantisation error well below one
 count in u8.
 
+**Mipmap generation** is performed by `map_to_images` / `map_to_images_card`
+using a 2×2 box filter with type-correct averaging: sRGB values are decoded to
+linear light before averaging and re-encoded afterward (avoiding dark mipmaps),
+normal-map XYZ vectors are averaged and renormalized (avoiding zero-length
+normals in PBR shaders), and ORM values are averaged directly in linear space.
+16× anisotropic filtering is enabled on all samplers.
+
 ## Running the viewer example
 
 ```sh
-cargo run --example texture_viewer
+cargo run --example texture_viewer --features egui
 ```
 
-Displays all five generators (Bark, Rock, Ground, Leaf, Twig) in two rows:
-albedo maps on top, normal maps below.  **Left-click any albedo panel** to
-apply a random mutation (rate = 0.3) and regenerate that texture.
+Displays an interactive material viewer with three columns: **albedo** (left),
+**normal map** (centre), and a **spinning 3-D PBR cube** (right) with the
+generated material applied.  An egui panel on the left lets you cycle through
+all 13 generators with **< Prev** / **Next >**, trigger a random **Mutate**
+(rate = 0.3), and edit every parameter live.
 
 ## License
 
