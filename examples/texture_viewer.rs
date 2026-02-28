@@ -238,7 +238,13 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
 
     for (i, config) in configs.iter().enumerate() {
         let pending = config.spawn_pending(TEX_SIZE, TEX_SIZE);
-        commands.spawn((pending, TaskSlot { slot: i, generation: 0 }));
+        commands.spawn((
+            pending,
+            TaskSlot {
+                slot: i,
+                generation: 0,
+            },
+        ));
     }
 
     store.configs = configs;
@@ -250,7 +256,13 @@ fn setup_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Camera2d — renders albedo and normal-map sprites to the full window.
-    commands.spawn((Camera2d, Camera { order: 0, ..default() }));
+    commands.spawn((
+        Camera2d,
+        Camera {
+            order: 0,
+            ..default()
+        },
+    ));
 
     // Camera3d — renders the spinning PBR cube into the rightmost column only.
     commands.spawn((
@@ -381,13 +393,6 @@ fn render_ui(
                     }
                 });
 
-            if loading {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label("Generating...");
-                });
-            }
-
             if ui.button("Mutate").clicked() {
                 mutate = true;
             }
@@ -410,6 +415,14 @@ fn render_ui(
                 PanelConfig::Metal(c) => metal_config_editor(ui, c, id),
                 PanelConfig::Pavers(c) => pavers_config_editor(ui, c, id),
             };
+
+            if loading {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Generating...");
+                });
+            }
+
             regen = r;
         });
 
@@ -430,7 +443,13 @@ fn render_ui(
         let next_gen = store.generations[slot].wrapping_add(1);
         store.generations[slot] = next_gen;
         let pending = store.configs[slot].spawn_pending(TEX_SIZE, TEX_SIZE);
-        commands.spawn((pending, TaskSlot { slot, generation: next_gen }));
+        commands.spawn((
+            pending,
+            TaskSlot {
+                slot,
+                generation: next_gen,
+            },
+        ));
     }
 }
 
