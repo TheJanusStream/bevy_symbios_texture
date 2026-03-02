@@ -30,8 +30,8 @@
 //! `SimpleGA`, `Nsga2`, and `MapElites` from the `symbios-genetics` crate.
 
 pub mod ashlar;
-pub mod async_gen;
 pub mod asphalt;
+pub mod async_gen;
 pub mod bark;
 pub mod brick;
 pub mod cobblestone;

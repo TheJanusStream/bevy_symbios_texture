@@ -162,8 +162,7 @@ impl TextureGenerator for ThatchGenerator {
 
                 // Height combines the fiber intensity and the sawtooth ramp
                 // so that each bundle layer rises from bottom to top.
-                let h_val = (fiber_t * (0.5 + 0.5 * layer_v)
-                    - shadow_t * c.layer_shadow * 0.3)
+                let h_val = (fiber_t * (0.5 + 0.5 * layer_v) - shadow_t * c.layer_shadow * 0.3)
                     .clamp(0.0, 1.0);
                 heights[idx] = h_val;
 
@@ -182,8 +181,8 @@ impl TextureGenerator for ThatchGenerator {
 
                 // ORM: thatch is rough throughout; slightly less rough on the
                 // bright fibre highlights, more rough in shadow areas.
-                let rough_val = (0.80 - fiber_t as f32 * 0.15 + shadow_t as f32 * 0.10)
-                    .clamp(0.65, 0.95);
+                let rough_val =
+                    (0.80 - fiber_t as f32 * 0.15 + shadow_t as f32 * 0.10).clamp(0.65, 0.95);
                 roughness_buf[ai] = 255;
                 roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
                 roughness_buf[ai + 2] = 0;

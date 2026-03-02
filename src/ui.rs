@@ -878,7 +878,13 @@ pub fn ashlar_config_editor(
                 &mut regen,
             );
             color_instant(ui, "Stone Color", &mut cfg.color_stone, &mut wb, &mut regen);
-            color_instant(ui, "Mortar Color", &mut cfg.color_mortar, &mut wb, &mut regen);
+            color_instant(
+                ui,
+                "Mortar Color",
+                &mut cfg.color_mortar,
+                &mut wb,
+                &mut regen,
+            );
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
@@ -980,7 +986,13 @@ pub fn thatch_config_editor(
                 &mut regen,
             );
             color_instant(ui, "Straw Color", &mut cfg.color_straw, &mut wb, &mut regen);
-            color_instant(ui, "Shadow Color", &mut cfg.color_shadow, &mut wb, &mut regen);
+            color_instant(
+                ui,
+                "Shadow Color",
+                &mut cfg.color_shadow,
+                &mut wb,
+                &mut regen,
+            );
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
@@ -1122,8 +1134,7 @@ pub fn asphalt_config_editor(
             );
             slider_debounced(
                 ui,
-                egui::Slider::new(&mut cfg.aggregate_density, 0.02..=0.5)
-                    .text("Aggregate Density"),
+                egui::Slider::new(&mut cfg.aggregate_density, 0.02..=0.5).text("Aggregate Density"),
                 &mut wb,
                 &mut regen,
             );
@@ -1175,8 +1186,22 @@ pub fn wainscoting_config_editor(
         .id_salt(id)
         .show(ui, |ui| {
             u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
-            usize_instant(ui, &mut cfg.panels_x, 1..=4, "Panels X", &mut wb, &mut regen);
-            usize_instant(ui, &mut cfg.panels_y, 1..=4, "Panels Y", &mut wb, &mut regen);
+            usize_instant(
+                ui,
+                &mut cfg.panels_x,
+                1..=4,
+                "Panels X",
+                &mut wb,
+                &mut regen,
+            );
+            usize_instant(
+                ui,
+                &mut cfg.panels_y,
+                1..=4,
+                "Panels Y",
+                &mut wb,
+                &mut regen,
+            );
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.frame_width, 0.05..=0.4).text("Frame Width"),
@@ -1237,7 +1262,14 @@ pub fn stained_glass_config_editor(
         .id_salt(id)
         .show(ui, |ui| {
             u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
-            usize_instant(ui, &mut cfg.cell_count, 3..=30, "Cell Count", &mut wb, &mut regen);
+            usize_instant(
+                ui,
+                &mut cfg.cell_count,
+                3..=30,
+                "Cell Count",
+                &mut wb,
+                &mut regen,
+            );
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.lead_width, 0.01..=0.15).text("Lead Width"),

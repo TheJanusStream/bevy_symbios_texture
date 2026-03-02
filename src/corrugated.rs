@@ -134,9 +134,8 @@ impl TextureGenerator for CorrugatedGenerator {
                 // and V-direction streaking.  Valleys = (1.0 - ridge_h) raised to
                 // a power to concentrate rust at the bottom of the trough.
                 let valley_factor = (1.0 - ridge_h).powf(1.5);
-                let rust_mask =
-                    (valley_factor * rust_n * (0.7 + streak_bias * 0.3) * c.rust_level)
-                        .clamp(0.0, 1.0);
+                let rust_mask = (valley_factor * rust_n * (0.7 + streak_bias * 0.3) * c.rust_level)
+                    .clamp(0.0, 1.0);
 
                 // Height: ridge profile dominates; micro-detail adds fine surface texture.
                 let h_val = (ridge_h * c.ridge_depth + surf * 0.05).clamp(0.0, 1.0);
@@ -146,9 +145,21 @@ impl TextureGenerator for CorrugatedGenerator {
                 // from the micro-detail layer that suggests scratches and sheen.
                 let metal_bright = lerp(0.85, 1.0, surf as f32);
                 let rust_mask_f = rust_mask as f32;
-                let r = lerp(c.color_metal[0] * metal_bright, c.color_rust[0], rust_mask_f);
-                let g = lerp(c.color_metal[1] * metal_bright, c.color_rust[1], rust_mask_f);
-                let b = lerp(c.color_metal[2] * metal_bright, c.color_rust[2], rust_mask_f);
+                let r = lerp(
+                    c.color_metal[0] * metal_bright,
+                    c.color_rust[0],
+                    rust_mask_f,
+                );
+                let g = lerp(
+                    c.color_metal[1] * metal_bright,
+                    c.color_rust[1],
+                    rust_mask_f,
+                );
+                let b = lerp(
+                    c.color_metal[2] * metal_bright,
+                    c.color_rust[2],
+                    rust_mask_f,
+                );
 
                 let ai = idx * 4;
                 albedo[ai] = linear_to_srgb(r);

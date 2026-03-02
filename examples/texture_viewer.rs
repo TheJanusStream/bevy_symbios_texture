@@ -43,9 +43,9 @@ use bevy_symbios_texture::{
         cobblestone_config_editor, concrete_config_editor, corrugated_config_editor,
         encaustic_config_editor, ground_config_editor, iron_grille_config_editor,
         leaf_config_editor, marble_config_editor, metal_config_editor, pavers_config_editor,
-        plank_config_editor, rock_config_editor, shingle_config_editor, stained_glass_config_editor,
-        stucco_config_editor, thatch_config_editor, twig_config_editor, wainscoting_config_editor,
-        window_config_editor,
+        plank_config_editor, rock_config_editor, shingle_config_editor,
+        stained_glass_config_editor, stucco_config_editor, thatch_config_editor,
+        twig_config_editor, wainscoting_config_editor, window_config_editor,
     },
     wainscoting::WainscotingConfig,
     window::WindowConfig,
@@ -175,9 +175,7 @@ impl PanelConfig {
             PanelConfig::Corrugated(c) => PendingTexture::corrugated(c.clone(), width, height),
             PanelConfig::Asphalt(c) => PendingTexture::asphalt(c.clone(), width, height),
             PanelConfig::Wainscoting(c) => PendingTexture::wainscoting(c.clone(), width, height),
-            PanelConfig::StainedGlass(c) => {
-                PendingTexture::stained_glass(c.clone(), width, height)
-            }
+            PanelConfig::StainedGlass(c) => PendingTexture::stained_glass(c.clone(), width, height),
             PanelConfig::IronGrille(c) => PendingTexture::iron_grille(c.clone(), width, height),
             PanelConfig::Encaustic(c) => PendingTexture::encaustic(c.clone(), width, height),
         }

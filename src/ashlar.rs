@@ -136,12 +136,7 @@ impl TextureGenerator for AshlarGenerator {
                 let ncols = row_ncols[r];
                 let widths: Vec<f64> = (0..ncols)
                     .map(|cl| {
-                        0.5 + 0.8
-                            * cell_hash(
-                                r as i64 * 31 + cl as i64,
-                                13,
-                                c.seed.wrapping_add(3),
-                            )
+                        0.5 + 0.8 * cell_hash(r as i64 * 31 + cl as i64, 13, c.seed.wrapping_add(3))
                     })
                     .collect();
                 let total: f64 = widths.iter().sum();
@@ -219,8 +214,7 @@ impl TextureGenerator for AshlarGenerator {
 
                 let dx = px.abs() - hx;
                 let dy = py.abs() - hy;
-                let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt()
-                    + dx.max(dy).min(0.0)
+                let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0)
                     - bevel_r_uv;
 
                 let idx = y * w + x;

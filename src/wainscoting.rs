@@ -207,10 +207,7 @@ fn bilinear_sample_torus(grid: &[f64], w: usize, h: usize, u: f64, v: f64) -> f6
     let v10 = grid[y0 * w + x1];
     let v01 = grid[y1 * w + x0];
     let v11 = grid[y1 * w + x1];
-    v00 * (1.0 - fx) * (1.0 - fy)
-        + v10 * fx * (1.0 - fy)
-        + v01 * (1.0 - fx) * fy
-        + v11 * fx * fy
+    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }
 
 #[inline]
