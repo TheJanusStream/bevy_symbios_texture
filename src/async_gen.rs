@@ -60,22 +60,32 @@ use bevy::{
 };
 
 use crate::{
+    ashlar::{AshlarConfig, AshlarGenerator},
+    asphalt::{AsphaltConfig, AsphaltGenerator},
     bark::{BarkConfig, BarkGenerator},
     brick::{BrickConfig, BrickGenerator},
+    cobblestone::{CobblestoneConfig, CobblestoneGenerator},
     concrete::{ConcreteConfig, ConcreteGenerator},
+    corrugated::{CorrugatedConfig, CorrugatedGenerator},
+    encaustic::{EncausticConfig, EncausticGenerator},
     generator::{
         GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images,
         map_to_images_card,
     },
     ground::{GroundConfig, GroundGenerator},
+    iron_grille::{IronGrilleConfig, IronGrilleGenerator},
     leaf::{LeafConfig, LeafGenerator},
+    marble::{MarbleConfig, MarbleGenerator},
     metal::{MetalConfig, MetalGenerator},
     pavers::{PaversConfig, PaversGenerator},
     plank::{PlankConfig, PlankGenerator},
     rock::{RockConfig, RockGenerator},
     shingle::{ShingleConfig, ShingleGenerator},
+    stained_glass::{StainedGlassConfig, StainedGlassGenerator},
     stucco::{StuccoConfig, StuccoGenerator},
+    thatch::{ThatchConfig, ThatchGenerator},
     twig::{TwigConfig, TwigGenerator},
+    wainscoting::{WainscotingConfig, WainscotingGenerator},
     window::{WindowConfig, WindowGenerator},
 };
 
@@ -250,6 +260,74 @@ impl PendingTexture {
     /// Spawn a pavers / tiles texture generation thread at `width × height` texels.
     pub fn pavers(config: PaversConfig, width: u32, height: u32) -> Self {
         let generator = PaversGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn an ashlar (cut stone masonry) texture generation thread at `width × height` texels.
+    pub fn ashlar(config: AshlarConfig, width: u32, height: u32) -> Self {
+        let generator = AshlarGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a cobblestone texture generation thread at `width × height` texels.
+    pub fn cobblestone(config: CobblestoneConfig, width: u32, height: u32) -> Self {
+        let generator = CobblestoneGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a thatch roofing texture generation thread at `width × height` texels.
+    pub fn thatch(config: ThatchConfig, width: u32, height: u32) -> Self {
+        let generator = ThatchGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a marble / granite texture generation thread at `width × height` texels.
+    pub fn marble(config: MarbleConfig, width: u32, height: u32) -> Self {
+        let generator = MarbleGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a corrugated metal texture generation thread at `width × height` texels.
+    pub fn corrugated(config: CorrugatedConfig, width: u32, height: u32) -> Self {
+        let generator = CorrugatedGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn an asphalt / tarmac texture generation thread at `width × height` texels.
+    pub fn asphalt(config: AsphaltConfig, width: u32, height: u32) -> Self {
+        let generator = AsphaltGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a wood paneling / wainscoting texture generation thread at `width × height` texels.
+    pub fn wainscoting(config: WainscotingConfig, width: u32, height: u32) -> Self {
+        let generator = WainscotingGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a stained glass texture generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
+    pub fn stained_glass(config: StainedGlassConfig, width: u32, height: u32) -> Self {
+        let generator = StainedGlassGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn an iron grille / portcullis texture generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
+    pub fn iron_grille(config: IronGrilleConfig, width: u32, height: u32) -> Self {
+        let generator = IronGrilleGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn an encaustic ceramic tile texture generation thread at `width × height` texels.
+    pub fn encaustic(config: EncausticConfig, width: u32, height: u32) -> Self {
+        let generator = EncausticGenerator::new(config);
         spawn_task(move || generator.generate(width, height), false)
     }
 }

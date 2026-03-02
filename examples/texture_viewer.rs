@@ -16,25 +16,38 @@ use symbios_genetics::Genotype;
 
 use bevy_symbios_texture::{
     SymbiosTexturePlugin,
+    ashlar::AshlarConfig,
+    asphalt::AsphaltConfig,
     async_gen::{PendingTexture, TextureReady},
     bark::BarkConfig,
     brick::BrickConfig,
+    cobblestone::CobblestoneConfig,
     concrete::ConcreteConfig,
+    corrugated::CorrugatedConfig,
+    encaustic::EncausticConfig,
     ground::GroundConfig,
+    iron_grille::IronGrilleConfig,
     leaf::LeafConfig,
+    marble::MarbleConfig,
     metal::MetalConfig,
     pavers::PaversConfig,
     plank::PlankConfig,
     rock::RockConfig,
     shingle::ShingleConfig,
+    stained_glass::StainedGlassConfig,
     stucco::StuccoConfig,
+    thatch::ThatchConfig,
     twig::TwigConfig,
     ui::{
-        bark_config_editor, brick_config_editor, concrete_config_editor, ground_config_editor,
-        leaf_config_editor, metal_config_editor, pavers_config_editor, plank_config_editor,
-        rock_config_editor, shingle_config_editor, stucco_config_editor, twig_config_editor,
+        ashlar_config_editor, asphalt_config_editor, bark_config_editor, brick_config_editor,
+        cobblestone_config_editor, concrete_config_editor, corrugated_config_editor,
+        encaustic_config_editor, ground_config_editor, iron_grille_config_editor,
+        leaf_config_editor, marble_config_editor, metal_config_editor, pavers_config_editor,
+        plank_config_editor, rock_config_editor, shingle_config_editor, stained_glass_config_editor,
+        stucco_config_editor, thatch_config_editor, twig_config_editor, wainscoting_config_editor,
         window_config_editor,
     },
+    wainscoting::WainscotingConfig,
     window::WindowConfig,
 };
 
@@ -99,6 +112,16 @@ enum PanelConfig {
     Concrete(ConcreteConfig),
     Metal(MetalConfig),
     Pavers(PaversConfig),
+    Ashlar(AshlarConfig),
+    Cobblestone(CobblestoneConfig),
+    Thatch(ThatchConfig),
+    Marble(MarbleConfig),
+    Corrugated(CorrugatedConfig),
+    Asphalt(AsphaltConfig),
+    Wainscoting(WainscotingConfig),
+    StainedGlass(StainedGlassConfig),
+    IronGrille(IronGrilleConfig),
+    Encaustic(EncausticConfig),
 }
 
 impl PanelConfig {
@@ -117,6 +140,16 @@ impl PanelConfig {
             PanelConfig::Concrete(c) => c.mutate(rng, rate),
             PanelConfig::Metal(c) => c.mutate(rng, rate),
             PanelConfig::Pavers(c) => c.mutate(rng, rate),
+            PanelConfig::Ashlar(c) => c.mutate(rng, rate),
+            PanelConfig::Cobblestone(c) => c.mutate(rng, rate),
+            PanelConfig::Thatch(c) => c.mutate(rng, rate),
+            PanelConfig::Marble(c) => c.mutate(rng, rate),
+            PanelConfig::Corrugated(c) => c.mutate(rng, rate),
+            PanelConfig::Asphalt(c) => c.mutate(rng, rate),
+            PanelConfig::Wainscoting(c) => c.mutate(rng, rate),
+            PanelConfig::StainedGlass(c) => c.mutate(rng, rate),
+            PanelConfig::IronGrille(c) => c.mutate(rng, rate),
+            PanelConfig::Encaustic(c) => c.mutate(rng, rate),
         }
     }
 
@@ -135,6 +168,18 @@ impl PanelConfig {
             PanelConfig::Concrete(c) => PendingTexture::concrete(c.clone(), width, height),
             PanelConfig::Metal(c) => PendingTexture::metal(c.clone(), width, height),
             PanelConfig::Pavers(c) => PendingTexture::pavers(c.clone(), width, height),
+            PanelConfig::Ashlar(c) => PendingTexture::ashlar(c.clone(), width, height),
+            PanelConfig::Cobblestone(c) => PendingTexture::cobblestone(c.clone(), width, height),
+            PanelConfig::Thatch(c) => PendingTexture::thatch(c.clone(), width, height),
+            PanelConfig::Marble(c) => PendingTexture::marble(c.clone(), width, height),
+            PanelConfig::Corrugated(c) => PendingTexture::corrugated(c.clone(), width, height),
+            PanelConfig::Asphalt(c) => PendingTexture::asphalt(c.clone(), width, height),
+            PanelConfig::Wainscoting(c) => PendingTexture::wainscoting(c.clone(), width, height),
+            PanelConfig::StainedGlass(c) => {
+                PendingTexture::stained_glass(c.clone(), width, height)
+            }
+            PanelConfig::IronGrille(c) => PendingTexture::iron_grille(c.clone(), width, height),
+            PanelConfig::Encaustic(c) => PendingTexture::encaustic(c.clone(), width, height),
         }
     }
 
@@ -153,6 +198,16 @@ impl PanelConfig {
             PanelConfig::Concrete(_) => "Concrete",
             PanelConfig::Metal(_) => "Metal",
             PanelConfig::Pavers(_) => "Pavers",
+            PanelConfig::Ashlar(_) => "Ashlar",
+            PanelConfig::Cobblestone(_) => "Cobblestone",
+            PanelConfig::Thatch(_) => "Thatch",
+            PanelConfig::Marble(_) => "Marble",
+            PanelConfig::Corrugated(_) => "Corrugated Metal",
+            PanelConfig::Asphalt(_) => "Asphalt",
+            PanelConfig::Wainscoting(_) => "Wainscoting",
+            PanelConfig::StainedGlass(_) => "Stained Glass",
+            PanelConfig::IronGrille(_) => "Iron Grille",
+            PanelConfig::Encaustic(_) => "Encaustic Tile",
         }
     }
 }
@@ -231,6 +286,16 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
         PanelConfig::Concrete(ConcreteConfig::default()),
         PanelConfig::Metal(MetalConfig::default()),
         PanelConfig::Pavers(PaversConfig::default()),
+        PanelConfig::Ashlar(AshlarConfig::default()),
+        PanelConfig::Cobblestone(CobblestoneConfig::default()),
+        PanelConfig::Thatch(ThatchConfig::default()),
+        PanelConfig::Marble(MarbleConfig::default()),
+        PanelConfig::Corrugated(CorrugatedConfig::default()),
+        PanelConfig::Asphalt(AsphaltConfig::default()),
+        PanelConfig::Wainscoting(WainscotingConfig::default()),
+        PanelConfig::StainedGlass(StainedGlassConfig::default()),
+        PanelConfig::IronGrille(IronGrilleConfig::default()),
+        PanelConfig::Encaustic(EncausticConfig::default()),
     ];
 
     store.textures = vec![None; configs.len()];
@@ -414,6 +479,16 @@ fn render_ui(
                 PanelConfig::Concrete(c) => concrete_config_editor(ui, c, id),
                 PanelConfig::Metal(c) => metal_config_editor(ui, c, id),
                 PanelConfig::Pavers(c) => pavers_config_editor(ui, c, id),
+                PanelConfig::Ashlar(c) => ashlar_config_editor(ui, c, id),
+                PanelConfig::Cobblestone(c) => cobblestone_config_editor(ui, c, id),
+                PanelConfig::Thatch(c) => thatch_config_editor(ui, c, id),
+                PanelConfig::Marble(c) => marble_config_editor(ui, c, id),
+                PanelConfig::Corrugated(c) => corrugated_config_editor(ui, c, id),
+                PanelConfig::Asphalt(c) => asphalt_config_editor(ui, c, id),
+                PanelConfig::Wainscoting(c) => wainscoting_config_editor(ui, c, id),
+                PanelConfig::StainedGlass(c) => stained_glass_config_editor(ui, c, id),
+                PanelConfig::IronGrille(c) => iron_grille_config_editor(ui, c, id),
+                PanelConfig::Encaustic(c) => encaustic_config_editor(ui, c, id),
             };
 
             if loading {

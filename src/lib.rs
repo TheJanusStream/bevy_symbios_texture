@@ -3,12 +3,14 @@
 //! # Generators
 //!
 //! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
-//! metal, shingle, pavers, stucco): wrap seamlessly via toroidal 4-D noise
-//! mapping.  Upload with [`map_to_images`] to get repeat-wrapping samplers.
+//! metal, shingle, pavers, stucco, ashlar, cobblestone, thatch, marble,
+//! corrugated, asphalt, wainscoting, encaustic): wrap seamlessly via toroidal
+//! 4-D noise mapping.  Upload with [`map_to_images`] to get repeat-wrapping
+//! samplers.
 //!
-//! **Alpha-masked cards** (leaf, twig, window): produce silhouettes with
-//! per-pixel alpha that must not tile.  Upload with [`map_to_images_card`] to
-//! get clamp-to-edge samplers.
+//! **Alpha-masked cards** (leaf, twig, window, stained_glass, iron_grille):
+//! produce silhouettes with per-pixel alpha that must not tile.  Upload with
+//! [`map_to_images_card`] to get clamp-to-edge samplers.
 //!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
@@ -27,14 +29,21 @@
 //! making them compatible with evolutionary search algorithms such as
 //! `SimpleGA`, `Nsga2`, and `MapElites` from the `symbios-genetics` crate.
 
+pub mod ashlar;
 pub mod async_gen;
+pub mod asphalt;
 pub mod bark;
 pub mod brick;
+pub mod cobblestone;
 pub mod concrete;
+pub mod corrugated;
+pub mod encaustic;
 pub mod generator;
 pub mod genetics;
 pub mod ground;
+pub mod iron_grille;
 pub mod leaf;
+pub mod marble;
 pub mod metal;
 pub mod noise;
 pub mod normal;
@@ -42,8 +51,11 @@ pub mod pavers;
 pub mod plank;
 pub mod rock;
 pub mod shingle;
+pub mod stained_glass;
 pub mod stucco;
+pub mod thatch;
 pub mod twig;
+pub mod wainscoting;
 pub mod window;
 
 #[cfg(feature = "egui")]

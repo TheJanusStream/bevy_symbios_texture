@@ -23,18 +23,28 @@
 
 use bevy_egui::egui;
 
+use crate::ashlar::AshlarConfig;
+use crate::asphalt::AsphaltConfig;
 use crate::bark::BarkConfig;
 use crate::brick::BrickConfig;
+use crate::cobblestone::CobblestoneConfig;
 use crate::concrete::ConcreteConfig;
+use crate::corrugated::CorrugatedConfig;
+use crate::encaustic::{EncausticConfig, EncausticPattern};
 use crate::ground::GroundConfig;
+use crate::iron_grille::IronGrilleConfig;
 use crate::leaf::LeafConfig;
+use crate::marble::MarbleConfig;
 use crate::metal::{MetalConfig, MetalStyle};
 use crate::pavers::{PaversConfig, PaversLayout};
 use crate::plank::PlankConfig;
 use crate::rock::RockConfig;
 use crate::shingle::ShingleConfig;
+use crate::stained_glass::StainedGlassConfig;
 use crate::stucco::StuccoConfig;
+use crate::thatch::ThatchConfig;
 use crate::twig::TwigConfig;
+use crate::wainscoting::WainscotingConfig;
 use crate::window::WindowConfig;
 
 // ---------------------------------------------------------------------------
@@ -816,6 +826,551 @@ pub fn pavers_config_editor(
             slider_debounced(
                 ui,
                 egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`AshlarConfig`] parameters inside a collapsing header.
+pub fn ashlar_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut AshlarConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Ashlar Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.rows, 2..=8, "Rows", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.cols, 2..=6, "Cols", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.mortar_size, 0.005..=0.15).text("Mortar Size"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.bevel, 0.0..=1.0).text("Bevel"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.cell_variance, 0.0..=1.0).text("Color Variance"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.chisel_depth, 0.0..=1.0).text("Chisel Depth"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Stone Color", &mut cfg.color_stone, &mut wb, &mut regen);
+            color_instant(ui, "Mortar Color", &mut cfg.color_mortar, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`CobblestoneConfig`] parameters inside a collapsing header.
+pub fn cobblestone_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut CobblestoneConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Cobblestone Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 2.0..=14.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.gap_width, 0.01..=0.3).text("Gap Width"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.cell_variance, 0.0..=1.0).text("Color Variance"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roundness, 0.3..=2.5).text("Roundness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Stone Color", &mut cfg.color_stone, &mut wb, &mut regen);
+            color_instant(ui, "Mud Color", &mut cfg.color_mud, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`ThatchConfig`] parameters inside a collapsing header.
+pub fn thatch_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut ThatchConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Thatch Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.density, 3.0..=24.0).text("Fibre Density"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.anisotropy, 2.0..=20.0).text("Anisotropy"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.warp_strength, 0.0..=0.6).text("Warp"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.layer_count, 2.0..=20.0).text("Layer Count"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.layer_shadow, 0.0..=1.0).text("Layer Shadow"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Straw Color", &mut cfg.color_straw, &mut wb, &mut regen);
+            color_instant(ui, "Shadow Color", &mut cfg.color_shadow, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`MarbleConfig`] parameters inside a collapsing header.
+pub fn marble_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut MarbleConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Marble Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 0.5..=10.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            usize_instant(ui, &mut cfg.octaves, 2..=10, "Octaves", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.warp_strength, 0.0..=2.0).text("Warp Strength"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.vein_frequency, 0.5..=10.0).text("Vein Frequency"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.vein_sharpness, 0.3..=8.0).text("Vein Sharpness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=0.4).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Base Color", &mut cfg.color_base, &mut wb, &mut regen);
+            color_instant(ui, "Vein Color", &mut cfg.color_vein, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=4.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`CorrugatedConfig`] parameters inside a collapsing header.
+pub fn corrugated_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut CorrugatedConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Corrugated Metal Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.ridges, 2.0..=20.0)
+                    .step_by(1.0)
+                    .text("Ridges"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.ridge_depth, 0.3..=2.5).text("Ridge Depth"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.0..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.rust_level, 0.0..=1.0).text("Rust"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.metallic, 0.0..=1.0).text("Metallic"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Metal Color", &mut cfg.color_metal, &mut wb, &mut regen);
+            color_instant(ui, "Rust Color", &mut cfg.color_rust, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`AsphaltConfig`] parameters inside a collapsing header.
+pub fn asphalt_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut AsphaltConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Asphalt Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=14.0).text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.aggregate_density, 0.02..=0.5)
+                    .text("Aggregate Density"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.aggregate_scale, 4.0..=40.0).text("Aggregate Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.roughness, 0.5..=1.0).text("Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.stain_level, 0.0..=1.0).text("Stain Level"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Base Color", &mut cfg.color_base, &mut wb, &mut regen);
+            color_instant(
+                ui,
+                "Aggregate Color",
+                &mut cfg.color_aggregate,
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=4.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`WainscotingConfig`] parameters inside a collapsing header.
+pub fn wainscoting_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut WainscotingConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Wainscoting Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.panels_x, 1..=4, "Panels X", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.panels_y, 1..=4, "Panels Y", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.frame_width, 0.05..=0.4).text("Frame Width"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.panel_inset, 0.0..=0.2).text("Panel Inset"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.grain_scale, 4.0..=28.0).text("Grain Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.grain_warp, 0.0..=1.0).text("Grain Warp"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(
+                ui,
+                "Wood Light",
+                &mut cfg.color_wood_light,
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(
+                ui,
+                "Wood Dark",
+                &mut cfg.color_wood_dark,
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=8.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`StainedGlassConfig`] parameters inside a collapsing header.
+pub fn stained_glass_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut StainedGlassConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Stained Glass Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.cell_count, 3..=30, "Cell Count", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.lead_width, 0.01..=0.15).text("Lead Width"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.saturation, 0.3..=1.0).text("Saturation"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.glass_roughness, 0.0..=0.2).text("Glass Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.grime_level, 0.0..=0.6).text("Grime"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=4.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`IronGrilleConfig`] parameters inside a collapsing header.
+pub fn iron_grille_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut IronGrilleConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Iron Grille Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.bars_x, 1..=12, "Bars X", &mut wb, &mut regen);
+            usize_instant(ui, &mut cfg.bars_y, 1..=12, "Bars Y", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.bar_width, 0.01..=0.25).text("Bar Width"),
+                &mut wb,
+                &mut regen,
+            );
+            bool_instant(ui, &mut cfg.round_bars, "Round Bars", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.rust_level, 0.0..=1.0).text("Rust"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Iron Color", &mut cfg.color_iron, &mut wb, &mut regen);
+            color_instant(ui, "Rust Color", &mut cfg.color_rust, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
+                &mut wb,
+                &mut regen,
+            );
+        });
+    (wb, regen)
+}
+
+/// Renders all [`EncausticConfig`] parameters inside a collapsing header.
+pub fn encaustic_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut EncausticConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    let mut wb = false;
+    let mut regen = false;
+    egui::CollapsingHeader::new("Encaustic Tile Config")
+        .id_salt(id)
+        .show(ui, |ui| {
+            u32_instant(ui, &mut cfg.seed, "Seed", &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.scale, 1.0..=12.0)
+                    .step_by(1.0)
+                    .text("Scale"),
+                &mut wb,
+                &mut regen,
+            );
+            // Pattern selector
+            ui.horizontal(|ui| {
+                ui.label("Pattern:");
+                let cb = cfg.pattern == EncausticPattern::Checkerboard;
+                if ui.selectable_label(cb, "Checker").clicked() && !cb {
+                    cfg.pattern = EncausticPattern::Checkerboard;
+                    wb = true;
+                    regen = true;
+                }
+                let oct = cfg.pattern == EncausticPattern::Octagon;
+                if ui.selectable_label(oct, "Octagon").clicked() && !oct {
+                    cfg.pattern = EncausticPattern::Octagon;
+                    wb = true;
+                    regen = true;
+                }
+                let dia = cfg.pattern == EncausticPattern::Diamond;
+                if ui.selectable_label(dia, "Diamond").clicked() && !dia {
+                    cfg.pattern = EncausticPattern::Diamond;
+                    wb = true;
+                    regen = true;
+                }
+            });
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.grout_width, 0.01..=0.2).text("Grout Width"),
+                &mut wb,
+                &mut regen,
+            );
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.glaze_roughness, 0.0..=0.15).text("Glaze Roughness"),
+                &mut wb,
+                &mut regen,
+            );
+            color_instant(ui, "Color A", &mut cfg.color_a, &mut wb, &mut regen);
+            color_instant(ui, "Color B", &mut cfg.color_b, &mut wb, &mut regen);
+            color_instant(ui, "Grout Color", &mut cfg.color_grout, &mut wb, &mut regen);
+            slider_debounced(
+                ui,
+                egui::Slider::new(&mut cfg.normal_strength, 0.0..=6.0).text("Normal Strength"),
                 &mut wb,
                 &mut regen,
             );
