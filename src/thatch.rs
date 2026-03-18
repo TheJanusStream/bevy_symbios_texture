@@ -15,8 +15,10 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
+    generator::{
+        TextureError, TextureGenerator, TextureMap, Workspace, linear_to_srgb, validate_dimensions,
+    },
+    noise::{ToroidalNoise, normalize, sample_grid_into},
     normal::{BoundaryMode, height_to_normal},
 };
 
@@ -67,46 +69,70 @@ impl Default for ThatchConfig {
 }
 
 /// Procedural thatch texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`ThatchConfig`].  Construct
+/// via [`ThatchGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::thatch`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct ThatchGenerator {
     config: ThatchConfig,
+    warp_noise: ToroidalNoise<Fbm<Perlin>>,
+    fibre_noise: ToroidalNoise<Fbm<Perlin>>,
+    layer_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl ThatchGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: ThatchConfig) -> Self {
-        Self { config }
+        let warp_freq = (config.density * 0.3).max(0.5);
+        let fbm_warp: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(7)).set_octaves(3);
+        let warp_noise = ToroidalNoise::new(fbm_warp, warp_freq);
+
+        let fbm_fibre: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(5);
+        let fibre_noise = ToroidalNoise::new(fbm_fibre, config.density);
+
+        let layer_freq = (config.density / config.anisotropy.max(1.0)).max(0.5);
+        let fbm_layer: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(150)).set_octaves(3);
+        let layer_noise = ToroidalNoise::new(fbm_layer, layer_freq);
+
+        Self {
+            config,
+            warp_noise,
+            fibre_noise,
+            layer_noise,
+        }
     }
 }
 
-impl TextureGenerator for ThatchGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+impl ThatchGenerator {
+    /// Core generation logic.  When `ws` is `Some`, borrows grid buffers from
+    /// the workspace and returns them when done, avoiding fresh allocations.
+    /// Reuses workspace buffers across calls so that generating multiple
+    /// size variants does not allocate new backing storage each time.
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        // ── Noise layers ─────────────────────────────────────────────────────
-        //
-        // Three toroidal FBMs:
-        //   warp  – low-frequency lateral domain warp (bends the fibres).
-        //   fibre – high U-frequency for individual straw streaks.
-        //   layer – low V-frequency for broad bundle-layer variation.
-        //
-        // We achieve anisotropy by using two separate toroidal noise objects
-        // whose frequencies are matched to the desired U and V wavelengths.
-        // `fibre_noise` uses `density` for a high horizontal frequency.
-        // `layer_noise` uses `density / anisotropy` for a low vertical one.
+        // Borrow or allocate grid buffers.
+        let (mut warp_grid, mut fibre_grid, mut layer_grid) = match ws.as_deref_mut() {
+            Some(w) => (w.take_grid(), w.take_grid(), w.take_grid()),
+            None => (Vec::new(), Vec::new(), Vec::new()),
+        };
 
-        let warp_freq = (c.density * 0.3).max(0.5);
-        let fbm_warp: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(7)).set_octaves(3);
-        let warp_noise = ToroidalNoise::new(fbm_warp, warp_freq);
-        let warp_grid = sample_grid(&warp_noise, width, height);
-
-        let fbm_fibre: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(5);
-        let fibre_noise = ToroidalNoise::new(fbm_fibre, c.density);
-        let fibre_grid = sample_grid(&fibre_noise, width, height);
-
-        let layer_freq = (c.density / c.anisotropy.max(1.0)).max(0.5);
-        let fbm_layer: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(150)).set_octaves(3);
-        let layer_noise = ToroidalNoise::new(fbm_layer, layer_freq);
-        let layer_grid = sample_grid(&layer_noise, width, height);
+        sample_grid_into(&self.warp_noise, width, height, &mut warp_grid);
+        sample_grid_into(&self.fibre_noise, width, height, &mut fibre_grid);
+        sample_grid_into(&self.layer_noise, width, height, &mut layer_grid);
 
         let w = width as usize;
         let h = height as usize;
@@ -119,55 +145,30 @@ impl TextureGenerator for ThatchGenerator {
         for y in 0..h {
             let v = y as f64 / h as f64;
 
-            // Sawtooth layer pattern in V: `layer_v` goes from 0 (bottom of
-            // the exposed bundle tip) to 1 (top, hidden under next layer).
-            // `layer_count` must be an integer for the pattern to tile; round
-            // to the nearest integer.
             let layer_count = c.layer_count.round().max(1.0);
-            let layer_v = (v * layer_count).fract(); // [0, 1) per layer
-
-            // Shadow gradient: dark at the bottom (layer_v ≈ 0, the exposed
-            // tip hanging down), bright at the top.
+            let layer_v = (v * layer_count).fract();
             let shadow_t = (1.0 - layer_v).powf(1.5);
 
             for x in 0..w {
                 let u = x as f64 / w as f64;
-
                 let idx = y * w + x;
 
-                // Domain warp: offset U before sampling the fibre noise.
-                // `warp_grid` is in [-1, 1]; scale by warp_strength to get
-                // a small UV displacement that bends the fibres laterally.
                 let warp = warp_grid[idx] * c.warp_strength;
 
-                // Fibre noise: use the warped U index.  Since we only have a
-                // precomputed grid at regular (u, v) positions, approximate the
-                // warped sample by remapping to the nearest warped pixel column.
-                // A true warp would require per-pixel noise evaluation; instead
-                // we index the precomputed grid with a clamped warped offset so
-                // the texture tiles correctly.
                 let warped_x = {
                     let ux = (u + warp).rem_euclid(1.0);
                     (ux * w as f64) as usize % w
                 };
                 let warped_idx = y * w + warped_x;
                 let fibre_raw = normalize(fibre_grid[warped_idx]);
-
-                // Layer variation: broad V-direction modulation.
                 let layer_raw = normalize(layer_grid[idx]);
 
-                // Combined fibre signal: weight fibre detail strongly, layer
-                // variation adds subtle brightness bands along V.
                 let fiber_t = (0.65 * fibre_raw + 0.35 * layer_raw).clamp(0.0, 1.0);
 
-                // Height combines the fiber intensity and the sawtooth ramp
-                // so that each bundle layer rises from bottom to top.
                 let h_val = (fiber_t * (0.5 + 0.5 * layer_v) - shadow_t * c.layer_shadow * 0.3)
                     .clamp(0.0, 1.0);
                 heights[idx] = h_val;
 
-                // Colour: lerp from shadow colour (dark, bottom of layer) to
-                // straw colour (bright, top of layer / fibre highlight).
                 let brightness = (fiber_t * (1.0 - shadow_t * c.layer_shadow)).clamp(0.0, 1.0);
                 let r = lerp(c.color_shadow[0], c.color_straw[0], brightness as f32);
                 let g = lerp(c.color_shadow[1], c.color_straw[1], brightness as f32);
@@ -179,8 +180,6 @@ impl TextureGenerator for ThatchGenerator {
                 albedo[ai + 2] = linear_to_srgb(b);
                 albedo[ai + 3] = 255;
 
-                // ORM: thatch is rough throughout; slightly less rough on the
-                // bright fibre highlights, more rough in shadow areas.
                 let rough_val =
                     (0.80 - fiber_t as f32 * 0.15 + shadow_t as f32 * 0.10).clamp(0.65, 0.95);
                 roughness_buf[ai] = 255;
@@ -188,6 +187,13 @@ impl TextureGenerator for ThatchGenerator {
                 roughness_buf[ai + 2] = 0;
                 roughness_buf[ai + 3] = 255;
             }
+        }
+
+        // Return grid buffers to the workspace for reuse.
+        if let Some(ws) = ws {
+            ws.return_grid(warp_grid);
+            ws.return_grid(fibre_grid);
+            ws.return_grid(layer_grid);
         }
 
         let normal = height_to_normal(
@@ -205,6 +211,21 @@ impl TextureGenerator for ThatchGenerator {
             width,
             height,
         })
+    }
+}
+
+impl TextureGenerator for ThatchGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 

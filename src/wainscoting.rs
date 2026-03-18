@@ -65,15 +65,34 @@ impl Default for WainscotingConfig {
 
 /// Procedural wainscoting / wood-paneling texture generator.
 ///
-/// Produces a tileable albedo, normal, and ORM map.  Upload via
-/// [`crate::generator::map_to_images`] for repeat-wrapping samplers.
+/// Drives [`TextureGenerator::generate`] using a [`WainscotingConfig`].  Construct
+/// via [`WainscotingGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::wainscoting`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct WainscotingGenerator {
     config: WainscotingConfig,
+    grain_noise: ToroidalNoise<Fbm<Perlin>>,
+    warp_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl WainscotingGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: WainscotingConfig) -> Self {
-        Self { config }
+        let grain_fbm: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(5);
+        let grain_noise = ToroidalNoise::new(grain_fbm, config.grain_scale);
+        let warp_fbm: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(77)).set_octaves(3);
+        let warp_noise = ToroidalNoise::new(warp_fbm, config.grain_scale * 0.3);
+        Self {
+            config,
+            grain_noise,
+            warp_noise,
+        }
     }
 }
 
@@ -83,14 +102,10 @@ impl TextureGenerator for WainscotingGenerator {
         let c = &self.config;
 
         // Grain FBM: anisotropic-ish, high frequency across the grain direction.
-        let grain_fbm: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(5);
-        let grain_noise = ToroidalNoise::new(grain_fbm, c.grain_scale);
-        let grain_grid = sample_grid(&grain_noise, width, height);
+        let grain_grid = sample_grid(&self.grain_noise, width, height);
 
         // Warp FBM: low frequency, used to domain-warp the grain UV.
-        let warp_fbm: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(77)).set_octaves(3);
-        let warp_noise = ToroidalNoise::new(warp_fbm, c.grain_scale * 0.3);
-        let warp_grid = sample_grid(&warp_noise, width, height);
+        let warp_grid = sample_grid(&self.warp_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

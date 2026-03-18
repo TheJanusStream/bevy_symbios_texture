@@ -77,15 +77,30 @@ impl Default for EncausticConfig {
 
 /// Procedural encaustic ceramic tile texture generator.
 ///
-/// Produces a tileable albedo, normal, and ORM map.  Upload via
-/// [`crate::generator::map_to_images`] for repeat-wrapping samplers.
+/// Drives [`TextureGenerator::generate`] using an [`EncausticConfig`].  Construct
+/// via [`EncausticGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::encaustic`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct EncausticGenerator {
     config: EncausticConfig,
+    glaze_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl EncausticGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: EncausticConfig) -> Self {
-        Self { config }
+        let glaze_fbm: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(4);
+        let glaze_noise = ToroidalNoise::new(glaze_fbm, config.scale * 1.5);
+        Self {
+            config,
+            glaze_noise,
+        }
     }
 }
 
@@ -95,9 +110,7 @@ impl TextureGenerator for EncausticGenerator {
         let c = &self.config;
 
         // Toroidal glaze FBM: low-frequency surface waviness from hand-firing.
-        let glaze_fbm: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(4);
-        let glaze_noise = ToroidalNoise::new(glaze_fbm, c.scale * 1.5);
-        let glaze_grid = sample_grid(&glaze_noise, width, height);
+        let glaze_grid = sample_grid(&self.glaze_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

@@ -55,14 +55,34 @@ impl Default for GroundConfig {
 /// Drives [`TextureGenerator::generate`] using a [`GroundConfig`].  Construct
 /// via [`GroundGenerator::new`] and call `generate` directly, or spawn a
 /// [`crate::async_gen::PendingTexture::ground`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct GroundGenerator {
     config: GroundConfig,
+    macro_noise: ToroidalNoise<Fbm<Perlin>>,
+    micro_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl GroundGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: GroundConfig) -> Self {
-        Self { config }
+        let fbm_macro: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.macro_octaves);
+        let macro_noise = ToroidalNoise::new(fbm_macro, config.macro_scale);
+
+        let fbm_micro: Fbm<Perlin> =
+            Fbm::new(config.seed.wrapping_add(50)).set_octaves(config.micro_octaves);
+        let micro_noise = ToroidalNoise::new(fbm_micro, config.micro_scale);
+
+        Self {
+            config,
+            macro_noise,
+            micro_noise,
+        }
     }
 }
 
@@ -70,12 +90,6 @@ impl TextureGenerator for GroundGenerator {
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
-
-        let fbm_macro: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.macro_octaves);
-        let fbm_micro: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(c.micro_octaves);
-
-        let macro_noise = ToroidalNoise::new(fbm_macro, c.macro_scale);
-        let micro_noise = ToroidalNoise::new(fbm_micro, c.micro_scale);
 
         let w = width as f64;
         let h = height as f64;
@@ -91,8 +105,8 @@ impl TextureGenerator for GroundGenerator {
                 let u = x as f64 / w;
                 let v = y as f64 / h;
 
-                let macro_val = normalize(macro_noise.get(u, v));
-                let micro_val = normalize(micro_noise.get(u, v));
+                let macro_val = normalize(self.macro_noise.get(u, v));
+                let micro_val = normalize(self.micro_noise.get(u, v));
 
                 let t = macro_val * (1.0 - c.micro_weight) + micro_val * c.micro_weight;
                 heights[idx] = t;

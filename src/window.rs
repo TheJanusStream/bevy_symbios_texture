@@ -60,17 +60,29 @@ impl Default for WindowConfig {
 
 /// Procedural window / glazing texture generator (foliage-card type).
 ///
+/// Drives [`TextureGenerator::generate`] using a [`WindowConfig`].  Construct
+/// via [`WindowGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::window`] task for non-blocking generation.
+///
 /// The result has per-pixel alpha: transparent outside the frame, semi-transparent
-/// glass, and opaque frame/mullions.  Upload via
-/// [`crate::async_gen::PendingTexture::window`] which selects the
-/// clamp-to-edge sampler automatically.
+/// glass, and opaque frame/mullions.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct WindowGenerator {
     config: WindowConfig,
+    grime_fbm: Fbm<Perlin>,
 }
 
 impl WindowGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: WindowConfig) -> Self {
-        Self { config }
+        let grime_fbm: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(6);
+        Self { config, grime_fbm }
     }
 }
 
@@ -78,9 +90,6 @@ impl TextureGenerator for WindowGenerator {
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
-
-        // FBM for glass grime — no tiling needed (card texture).
-        let grime_fbm: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(6);
 
         let w = width as usize;
         let h = height as usize;
@@ -156,10 +165,8 @@ impl TextureGenerator for WindowGenerator {
                     // Check if we're on an internal mullion line.
                     // The outer boundary lines coincide with the frame so panes_x=1 never
                     // produces spurious mullions inside the glass.
-                    let is_mullion_x = panes_x > 1
-                        && (pu < mhx || pu > 1.0 - mhx);
-                    let is_mullion_y = panes_y > 1
-                        && (pv < mhy || pv > 1.0 - mhy);
+                    let is_mullion_x = panes_x > 1 && (pu < mhx || pu > 1.0 - mhx);
+                    let is_mullion_y = panes_y > 1 && (pv < mhy || pv > 1.0 - mhy);
 
                     // For single-pane axis, still suppress the outer boundary band
                     // using the same thickness as internal mullions (in glass-UV).
@@ -181,7 +188,7 @@ impl TextureGenerator for WindowGenerator {
                         roughness_buf[ai + 3] = 255;
                     } else {
                         // Glass pane.
-                        let grime_raw = grime_fbm.get([u * 8.0, v * 8.0]) * 0.5 + 0.5;
+                        let grime_raw = self.grime_fbm.get([u * 8.0, v * 8.0]) * 0.5 + 0.5;
                         let grime = grime_raw * c.grime_level;
 
                         heights[idx] = grime * 0.08;

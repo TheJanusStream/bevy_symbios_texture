@@ -59,15 +59,38 @@ impl Default for ConcreteConfig {
 
 /// Procedural cast-concrete texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::async_gen::PendingTexture::concrete`] / [`crate::generator::map_to_images`].
+/// Drives [`TextureGenerator::generate`] using a [`ConcreteConfig`].  Construct
+/// via [`ConcreteGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::concrete`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct ConcreteGenerator {
     config: ConcreteConfig,
+    surf_noise: ToroidalNoise<Fbm<Perlin>>,
+    pit_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl ConcreteGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: ConcreteConfig) -> Self {
-        Self { config }
+        let fbm_surf: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let surf_noise = ToroidalNoise::new(fbm_surf, config.scale);
+
+        let fbm_pit: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(77))
+            .set_octaves(3)
+            .set_frequency(2.0);
+        let pit_noise = ToroidalNoise::new(fbm_pit, config.scale * 4.0);
+
+        Self {
+            config,
+            surf_noise,
+            pit_noise,
+        }
     }
 }
 
@@ -77,16 +100,10 @@ impl TextureGenerator for ConcreteGenerator {
         let c = &self.config;
 
         // Main surface FBM — smooth, low-frequency bumps.
-        let fbm_surf: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.octaves);
-        let surf_noise = ToroidalNoise::new(fbm_surf, c.scale);
-        let surf = sample_grid(&surf_noise, width, height);
+        let surf = sample_grid(&self.surf_noise, width, height);
 
         // High-frequency pit noise — separate seed.
-        let fbm_pit: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(77))
-            .set_octaves(3)
-            .set_frequency(2.0);
-        let pit_noise = ToroidalNoise::new(fbm_pit, c.scale * 4.0);
-        let pits = sample_grid(&pit_noise, width, height);
+        let pits = sample_grid(&self.pit_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

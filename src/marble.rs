@@ -69,16 +69,40 @@ impl Default for MarbleConfig {
 
 /// Procedural marble / granite texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps via domain-warped FBM noise.
-/// Upload via [`crate::generator::map_to_images`] for repeat-wrapping samplers.
+/// Drives [`TextureGenerator::generate`] using a [`MarbleConfig`].  Construct
+/// via [`MarbleGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::marble`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct MarbleGenerator {
     config: MarbleConfig,
+    warp_u_noise: ToroidalNoise<Fbm<Perlin>>,
+    warp_v_noise: ToroidalNoise<Fbm<Perlin>>,
+    base_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl MarbleGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: MarbleConfig) -> Self {
-        Self { config }
+        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let fbm_warp_v: Fbm<Perlin> =
+            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.octaves);
+        let fbm_base: Fbm<Perlin> =
+            Fbm::new(config.seed.wrapping_add(200)).set_octaves(config.octaves);
+        let warp_u_noise = ToroidalNoise::new(fbm_warp_u, config.scale);
+        let warp_v_noise = ToroidalNoise::new(fbm_warp_v, config.scale);
+        let base_noise = ToroidalNoise::new(fbm_base, config.scale);
+        Self {
+            config,
+            warp_u_noise,
+            warp_v_noise,
+            base_noise,
+        }
     }
 }
 
@@ -86,15 +110,6 @@ impl TextureGenerator for MarbleGenerator {
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
-
-        // Three independent FBM sources with offset seeds.
-        let fbm_warp_u: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.octaves);
-        let fbm_warp_v: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(c.octaves);
-        let fbm_base: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(200)).set_octaves(c.octaves);
-
-        let warp_u_noise = ToroidalNoise::new(fbm_warp_u, c.scale);
-        let warp_v_noise = ToroidalNoise::new(fbm_warp_v, c.scale);
-        let base_noise = ToroidalNoise::new(fbm_base, c.scale);
 
         let w = width as usize;
         let h = height as usize;
@@ -120,7 +135,7 @@ impl TextureGenerator for MarbleGenerator {
         // Precompute the base noise on a regular grid using the torus LUTs
         // (O(W+H) trig calls).  The warped lookup then becomes a cheap
         // bilinear interpolation rather than per-pixel sin/cos evaluation.
-        let base_grid = sample_grid(&base_noise, width, height);
+        let base_grid = sample_grid(&self.base_noise, width, height);
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -137,8 +152,8 @@ impl TextureGenerator for MarbleGenerator {
                 let u = x as f64 / w as f64;
 
                 // Compute warp offsets using precomputed torus coordinates.
-                let du = warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_strength;
-                let dv = warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_strength;
+                let du = self.warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_strength;
+                let dv = self.warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_strength;
 
                 // Sample the precomputed base grid at the warped UV coordinates.
                 // Bilinear interpolation wraps toroidally — no trig per pixel.

@@ -62,13 +62,35 @@ impl Default for PlankConfig {
 }
 
 /// Procedural wood-plank / siding texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`PlankConfig`].  Construct
+/// via [`PlankGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::plank`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.  Worley knot noise is still
+/// constructed in `generate()` because `Worley` is `!Send`.
 pub struct PlankGenerator {
     config: PlankConfig,
+    fbm_warp: Fbm<Perlin>,
+    grain_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl PlankGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: PlankConfig) -> Self {
-        Self { config }
+        let fbm_warp: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(3);
+        let grain_fbm: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(100)).set_octaves(5);
+        let grain_noise = ToroidalNoise::new(grain_fbm, 1.0);
+        Self {
+            config,
+            fbm_warp,
+            grain_noise,
+        }
     }
 }
 
@@ -77,14 +99,11 @@ impl TextureGenerator for PlankGenerator {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        // Domain-warp source: low-frequency FBM that bends grain lines.
-        let fbm_warp: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(3);
-        // Anisotropic grain FBM (evaluated inline with custom coords).
-        let grain_fbm: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(5);
-        let grain_noise = ToroidalNoise::new(grain_fbm, 1.0);
         // plank_count must be an integer for the grid to tile vertically.
         let plank_count = c.plank_count.round();
-        // Worley for knots.
+
+        // Worley for knots — constructed here because Worley contains an Rc
+        // and is not Send, so it cannot be stored on the struct.
         let worley = Worley::new(c.seed.wrapping_add(200)).set_return_type(ReturnType::Distance);
         let knot_noise = ToroidalNoise::new(worley, plank_count * 1.5);
 
@@ -173,13 +192,13 @@ impl TextureGenerator for PlankGenerator {
                 }
 
                 // Domain warp: low-freq FBM nudges grain coordinate.
-                let warp_u = fbm_warp.get([u * 2.0, v * 2.0]) * c.grain_warp * 0.08;
+                let warp_u = self.fbm_warp.get([u * 2.0, v * 2.0]) * c.grain_warp * 0.08;
 
                 // Anisotropic grain: per-plank phase shift on U.
                 let u_grain = (u + row_phase * 0.7 + warp_u).rem_euclid(1.0);
                 let g_nx = (TAU * u_grain).cos() * g_freq_u;
                 let g_ny = (TAU * u_grain).sin() * g_freq_u;
-                let grain_raw = grain_noise.get_precomputed(g_nx, g_ny, g_nz, g_nw);
+                let grain_raw = self.grain_noise.get_precomputed(g_nx, g_ny, g_nz, g_nw);
                 let grain_t = normalize(grain_raw); // [0, 1]
 
                 // Knot: Worley cell distance → circular depression.

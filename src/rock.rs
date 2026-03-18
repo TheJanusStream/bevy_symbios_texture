@@ -48,14 +48,26 @@ impl Default for RockConfig {
 /// Drives [`TextureGenerator::generate`] using a [`RockConfig`].  Construct
 /// via [`RockGenerator::new`] and call `generate` directly, or spawn a
 /// [`crate::async_gen::PendingTexture::rock`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct RockGenerator {
     config: RockConfig,
+    noise: ToroidalNoise<RidgedMulti<Perlin>>,
 }
 
 impl RockGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the ridged-multifractal noise object up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: RockConfig) -> Self {
-        Self { config }
+        let ridged: RidgedMulti<Perlin> = RidgedMulti::new(config.seed)
+            .set_octaves(config.octaves)
+            .set_attenuation(config.attenuation);
+        let noise = ToroidalNoise::new(ridged, config.scale);
+        Self { config, noise }
     }
 }
 
@@ -64,12 +76,7 @@ impl TextureGenerator for RockGenerator {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        let ridged: RidgedMulti<Perlin> = RidgedMulti::new(c.seed)
-            .set_octaves(c.octaves)
-            .set_attenuation(c.attenuation);
-
-        let noise = ToroidalNoise::new(ridged, c.scale);
-        let heights = sample_grid(&noise, width, height);
+        let heights = sample_grid(&self.noise, width, height);
 
         let n = (width as usize) * (height as usize);
         let mut albedo = vec![0u8; n * 4];

@@ -59,6 +59,65 @@ pub struct GeneratedHandles {
     pub roughness: Handle<Image>,
 }
 
+/// Reusable scratch buffers for texture generation.
+///
+/// At high resolutions each `Vec<f64>` noise grid is large (128 MB at
+/// 4096×4096).  Generators that produce multiple grids can spike memory by
+/// hundreds of megabytes per task.  A `Workspace` lets callers pre-allocate
+/// these buffers once and pass them into [`TextureGenerator::generate_with_workspace`]
+/// so the same heap memory is reused across generations instead of being
+/// allocated and freed on every call.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use bevy_symbios_texture::generator::{Workspace, TextureGenerator};
+/// use bevy_symbios_texture::thatch::{ThatchConfig, ThatchGenerator};
+///
+/// let gen = ThatchGenerator::new(ThatchConfig::default());
+/// let mut ws = Workspace::new();
+///
+/// // First call allocates; subsequent calls reuse the same buffers.
+/// let map1 = gen.generate_with_workspace(2048, 2048, &mut ws).unwrap();
+/// let map2 = gen.generate_with_workspace(2048, 2048, &mut ws).unwrap();
+/// ```
+pub struct Workspace {
+    /// Pool of reusable `f64` grid buffers (noise samples, height maps, etc.).
+    ///
+    /// Generators call [`Workspace::take_grid`] to borrow a buffer and
+    /// [`Workspace::return_grid`] to put it back when done.
+    grids: Vec<Vec<f64>>,
+}
+
+impl Default for Workspace {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Workspace {
+    /// Create an empty workspace.  Buffers are allocated on first use.
+    pub fn new() -> Self {
+        Self { grids: Vec::new() }
+    }
+
+    /// Take a grid buffer from the pool, or create a new empty one.
+    ///
+    /// The returned `Vec` may have leftover capacity from a previous call —
+    /// callers should `clear()` or use [`sample_grid_into`] which handles
+    /// resizing.
+    ///
+    /// [`sample_grid_into`]: crate::noise::sample_grid_into
+    pub fn take_grid(&mut self) -> Vec<f64> {
+        self.grids.pop().unwrap_or_default()
+    }
+
+    /// Return a grid buffer to the pool for reuse by the next generation.
+    pub fn return_grid(&mut self, buf: Vec<f64>) {
+        self.grids.push(buf);
+    }
+}
+
 /// Trait for procedural texture configuration structs.
 ///
 /// Each struct that drives a specific texture type (bark, rock, ground, …)
@@ -70,6 +129,25 @@ pub trait TextureGenerator {
     /// Returns [`TextureError`] if `width` or `height` is zero or exceeds
     /// [`MAX_DIMENSION`].
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError>;
+
+    /// Generate using pre-allocated scratch buffers from `workspace`.
+    ///
+    /// The default implementation ignores the workspace and delegates to
+    /// [`generate`](TextureGenerator::generate).  Generators that allocate
+    /// large intermediate grids (e.g. [`ThatchGenerator`], [`BarkGenerator`])
+    /// override this to pull buffers from the workspace, avoiding repeated
+    /// 128 MB+ allocations at high resolutions.
+    ///
+    /// [`ThatchGenerator`]: crate::thatch::ThatchGenerator
+    /// [`BarkGenerator`]: crate::bark::BarkGenerator
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        _workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate(width, height)
+    }
 }
 
 /// Maximum allowed texture dimension (per side).

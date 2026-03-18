@@ -65,13 +65,32 @@ impl Default for BrickConfig {
 }
 
 /// Procedural brick-wall texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`BrickConfig`].  Construct
+/// via [`BrickGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::brick`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct BrickGenerator {
     config: BrickConfig,
+    rough_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl BrickGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: BrickConfig) -> Self {
-        Self { config }
+        let fbm_rough: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(4);
+        let rough_noise = ToroidalNoise::new(fbm_rough, config.scale * config.aspect_ratio * 2.0);
+
+        Self {
+            config,
+            rough_noise,
+        }
     }
 }
 
@@ -81,9 +100,7 @@ impl TextureGenerator for BrickGenerator {
         let c = &self.config;
 
         // Toroidal surface-roughness FBM for pitting detail.
-        let fbm_rough: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(4);
-        let rough_noise = ToroidalNoise::new(fbm_rough, c.scale * c.aspect_ratio * 2.0);
-        let rough_grid = sample_grid(&rough_noise, width, height);
+        let rough_grid = sample_grid(&self.rough_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

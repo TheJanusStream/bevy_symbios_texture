@@ -65,16 +65,34 @@ impl Default for CorrugatedConfig {
 
 /// Procedural corrugated-metal texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::generator::map_to_images`] for repeat-wrapping samplers.
+/// Drives [`TextureGenerator::generate`] using a [`CorrugatedConfig`].  Construct
+/// via [`CorrugatedGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::corrugated`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct CorrugatedGenerator {
     config: CorrugatedConfig,
+    micro_noise: ToroidalNoise<Fbm<Perlin>>,
+    rust_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl CorrugatedGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: CorrugatedConfig) -> Self {
-        Self { config }
+        let fbm_micro: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(4);
+        let micro_noise = ToroidalNoise::new(fbm_micro, config.ridges * 0.5);
+        let fbm_rust: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(100)).set_octaves(3);
+        let rust_noise = ToroidalNoise::new(fbm_rust, config.ridges * 0.25);
+        Self {
+            config,
+            micro_noise,
+            rust_noise,
+        }
     }
 }
 
@@ -86,16 +104,12 @@ impl TextureGenerator for CorrugatedGenerator {
         // Micro-detail FBM — higher frequency for surface scratches and
         // manufacturing texture.  Uses `ridges * 0.5` as the toroidal radius
         // so the detail density scales with the number of corrugation ridges.
-        let fbm_micro: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(4);
-        let micro_noise = ToroidalNoise::new(fbm_micro, c.ridges * 0.5);
-        let micro_grid = sample_grid(&micro_noise, width, height);
+        let micro_grid = sample_grid(&self.micro_noise, width, height);
 
         // Rust noise — separate seed, lower frequency for blotchy weathering.
         // A separate V-direction streaking pass uses a portion of this same grid
         // to simulate vertical rust runs from the ridges.
-        let fbm_rust: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(3);
-        let rust_noise = ToroidalNoise::new(fbm_rust, c.ridges * 0.25);
-        let rust_grid = sample_grid(&rust_noise, width, height);
+        let rust_grid = sample_grid(&self.rust_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

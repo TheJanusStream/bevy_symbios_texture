@@ -19,8 +19,10 @@ use noise::core::worley::ReturnType;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin, Worley};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, sample_grid},
+    generator::{
+        TextureError, TextureGenerator, TextureMap, Workspace, linear_to_srgb, validate_dimensions,
+    },
+    noise::{ToroidalNoise, sample_grid_into},
     normal::{BoundaryMode, height_to_normal},
 };
 
@@ -78,33 +80,57 @@ impl Default for BarkConfig {
 /// Drives [`TextureGenerator::generate`] using a [`BarkConfig`].  Construct
 /// via [`BarkGenerator::new`] and call `generate` directly, or spawn a
 /// [`crate::async_gen::PendingTexture::bark`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.  Worley noise is still
+/// constructed in `generate_inner()` because `Worley` is `!Send`.
 pub struct BarkGenerator {
     config: BarkConfig,
+    warp_u_noise: ToroidalNoise<Fbm<Perlin>>,
+    warp_v_noise: ToroidalNoise<Fbm<Perlin>>,
+    base_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl BarkGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: BarkConfig) -> Self {
-        Self { config }
+        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let fbm_warp_v: Fbm<Perlin> =
+            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.octaves);
+        let fbm_base: Fbm<Perlin> =
+            Fbm::new(config.seed.wrapping_add(200)).set_octaves(config.octaves);
+        let warp_u_noise = ToroidalNoise::new(fbm_warp_u, config.scale);
+        let warp_v_noise = ToroidalNoise::new(fbm_warp_v, config.scale);
+        let base_noise = ToroidalNoise::new(fbm_base, config.scale);
+        Self {
+            config,
+            warp_u_noise,
+            warp_v_noise,
+            base_noise,
+        }
     }
 }
 
-impl TextureGenerator for BarkGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+impl BarkGenerator {
+    /// Core generation logic.  When `ws` is `Some`, borrows the base grid
+    /// buffer from the workspace to avoid a fresh 128 MB allocation at 4K.
+    /// Reuses workspace buffers across calls so that generating multiple
+    /// size variants does not allocate new backing storage each time.
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        // Three independent FBM sources with offset seeds.
-        let fbm_warp_u: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.octaves);
-        let fbm_warp_v: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(c.octaves);
-        let fbm_base: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(200)).set_octaves(c.octaves);
-
-        let warp_u_noise = ToroidalNoise::new(fbm_warp_u, c.scale);
-        let warp_v_noise = ToroidalNoise::new(fbm_warp_v, c.scale);
-        let base_noise = ToroidalNoise::new(fbm_base, c.scale);
-
-        // Worley noise for rhytidome plates — frequency = 1.0 because we bake
-        // the anisotropic scaling into the torus lookup tables below.
+        // Worley noise for rhytidome plates — constructed here because Worley
+        // contains an Rc and is not Send, so it cannot be stored on the struct.
         let worley = Worley::new(c.seed.wrapping_add(300)).set_return_type(ReturnType::Distance);
 
         let w = width as usize;
@@ -112,8 +138,6 @@ impl TextureGenerator for BarkGenerator {
         let n = w * h;
 
         // Precompute toroidal coordinates (W + H entries instead of W × H).
-        // All three noise objects share the same `c.scale` frequency so one
-        // set of lookup tables covers all of them.
         let freq = c.scale;
         let col_cos: Vec<f64> = (0..w)
             .map(|x| (TAU * x as f64 / w as f64).cos() * freq)
@@ -129,8 +153,6 @@ impl TextureGenerator for BarkGenerator {
             .collect();
 
         // Anisotropic torus tables for the Worley furrow layer.
-        // High U frequency → narrow horizontal spacing (many columns of plates).
-        // Low V frequency  → wide vertical spacing (long plates, deep fissures).
         let f_freq_u = c.scale * c.furrow_scale_u;
         let f_freq_v = c.scale * c.furrow_scale_v;
         let f_col_cos: Vec<f64> = (0..w)
@@ -146,10 +168,9 @@ impl TextureGenerator for BarkGenerator {
             .map(|y| (TAU * y as f64 / h as f64).sin() * f_freq_v)
             .collect();
 
-        // Precompute the base noise on a regular grid using the torus LUTs
-        // (O(W+H) trig calls).  The warped lookup then becomes a cheap
-        // bilinear interpolation rather than per-pixel sin/cos evaluation.
-        let base_grid = sample_grid(&base_noise, width, height);
+        // Precompute the base noise on a regular grid using the torus LUTs.
+        let mut base_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.base_noise, width, height, &mut base_grid);
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -169,8 +190,8 @@ impl TextureGenerator for BarkGenerator {
                 let u = x as f64 / w as f64;
 
                 // Compute warp offsets using precomputed torus coordinates.
-                let du = warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
-                let dv = warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
+                let du = self.warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
+                let dv = self.warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
 
                 // Sample the precomputed base grid at the warped UV coordinates.
                 // Bilinear interpolation wraps toroidally — no trig per pixel.
@@ -216,6 +237,11 @@ impl TextureGenerator for BarkGenerator {
             }
         }
 
+        // Return grid buffer to the workspace for reuse.
+        if let Some(ws) = ws {
+            ws.return_grid(base_grid);
+        }
+
         let normal = height_to_normal(
             &heights,
             width,
@@ -231,6 +257,21 @@ impl TextureGenerator for BarkGenerator {
             width,
             height,
         })
+    }
+}
+
+impl TextureGenerator for BarkGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 

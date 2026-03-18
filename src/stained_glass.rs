@@ -56,17 +56,29 @@ impl Default for StainedGlassConfig {
 
 /// Procedural stained-glass texture generator (alpha-card type).
 ///
+/// Drives [`TextureGenerator::generate`] using a [`StainedGlassConfig`].  Construct
+/// via [`StainedGlassGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::stained_glass`] task for non-blocking generation.
+///
 /// The result has per-pixel alpha: semi-transparent glass cells separated by
-/// fully-opaque lead came lines.  Upload via
-/// [`crate::generator::map_to_images_card`] to select the clamp-to-edge
-/// sampler automatically.
+/// fully-opaque lead came lines.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct StainedGlassGenerator {
     config: StainedGlassConfig,
+    grime_fbm: Fbm<Perlin>,
 }
 
 impl StainedGlassGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: StainedGlassConfig) -> Self {
-        Self { config }
+        let grime_fbm: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(11)).set_octaves(5);
+        Self { config, grime_fbm }
     }
 }
 
@@ -74,9 +86,6 @@ impl TextureGenerator for StainedGlassGenerator {
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
-
-        // Grime FBM — no tiling needed for a card texture.
-        let grime_fbm: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(11)).set_octaves(5);
 
         let w = width as usize;
         let h = height as usize;
@@ -127,7 +136,7 @@ impl TextureGenerator for StainedGlassGenerator {
                     let glass_rgb = hsv_to_rgb(hue, saturation.clamp(0.0, 1.0), 0.85);
 
                     // Grime: FBM dirt on the glass surface.
-                    let grime_raw = grime_fbm.get([u * 6.0, v * 6.0]) * 0.5 + 0.5;
+                    let grime_raw = self.grime_fbm.get([u * 6.0, v * 6.0]) * 0.5 + 0.5;
                     let grime = (grime_raw * c.grime_level) as f32;
 
                     heights[idx] = grime_raw * c.grime_level * 0.05;

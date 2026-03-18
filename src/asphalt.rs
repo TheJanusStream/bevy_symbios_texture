@@ -63,16 +63,38 @@ impl Default for AsphaltConfig {
 
 /// Procedural asphalt / tarmac texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::generator::map_to_images`] for repeat-wrapping samplers.
+/// Drives [`TextureGenerator::generate`] using an [`AsphaltConfig`].  Construct
+/// via [`AsphaltGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::asphalt`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct AsphaltGenerator {
     config: AsphaltConfig,
+    macro_noise: ToroidalNoise<Fbm<Perlin>>,
+    micro_noise: ToroidalNoise<Fbm<Perlin>>,
+    agg_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl AsphaltGenerator {
     /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: AsphaltConfig) -> Self {
-        Self { config }
+        let fbm_macro: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(3);
+        let macro_noise = ToroidalNoise::new(fbm_macro, config.scale);
+        let fbm_micro: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(4);
+        let micro_noise = ToroidalNoise::new(fbm_micro, config.scale * 3.0);
+        let fbm_agg: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(200)).set_octaves(2);
+        let agg_noise = ToroidalNoise::new(fbm_agg, config.aggregate_scale);
+        Self {
+            config,
+            macro_noise,
+            micro_noise,
+            agg_noise,
+        }
     }
 }
 
@@ -82,19 +104,13 @@ impl TextureGenerator for AsphaltGenerator {
         let c = &self.config;
 
         // Macro stain / colour-variation FBM — low frequency for large blotches.
-        let fbm_macro: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(3);
-        let macro_noise = ToroidalNoise::new(fbm_macro, c.scale);
-        let macro_grid = sample_grid(&macro_noise, width, height);
+        let macro_grid = sample_grid(&self.macro_noise, width, height);
 
         // Mid-frequency micro-texture — the fine granular surface of the binder.
-        let fbm_micro: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(4);
-        let micro_noise = ToroidalNoise::new(fbm_micro, c.scale * 3.0);
-        let micro_grid = sample_grid(&micro_noise, width, height);
+        let micro_grid = sample_grid(&self.micro_noise, width, height);
 
         // High-frequency aggregate fleck noise — sharp, fine-grained.
-        let fbm_agg: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(200)).set_octaves(2);
-        let agg_noise = ToroidalNoise::new(fbm_agg, c.aggregate_scale);
-        let aggregate_grid = sample_grid(&agg_noise, width, height);
+        let aggregate_grid = sample_grid(&self.agg_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

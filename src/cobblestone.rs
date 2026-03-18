@@ -55,13 +55,28 @@ impl Default for CobblestoneConfig {
 }
 
 /// Procedural cobblestone texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`CobblestoneConfig`].  Construct
+/// via [`CobblestoneGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::cobblestone`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct CobblestoneGenerator {
     config: CobblestoneConfig,
+    surf_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl CobblestoneGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: CobblestoneConfig) -> Self {
-        Self { config }
+        let fbm_surf: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(4);
+        let surf_noise = ToroidalNoise::new(fbm_surf, config.scale * 2.5);
+        Self { config, surf_noise }
     }
 }
 
@@ -71,9 +86,7 @@ impl TextureGenerator for CobblestoneGenerator {
         let c = &self.config;
 
         // Toroidal FBM for stone-surface micro-detail.
-        let fbm_surf: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(4);
-        let surf_noise = ToroidalNoise::new(fbm_surf, c.scale * 2.5);
-        let surf_grid = sample_grid(&surf_noise, width, height);
+        let surf_grid = sample_grid(&self.surf_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

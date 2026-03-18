@@ -77,15 +77,35 @@ impl Default for MetalConfig {
 
 /// Procedural metal texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::async_gen::PendingTexture::metal`] / [`crate::generator::map_to_images`].
+/// Drives [`TextureGenerator::generate`] using a [`MetalConfig`].  Construct
+/// via [`MetalGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::metal`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct MetalGenerator {
     config: MetalConfig,
+    fbm_scratch: Fbm<Perlin>,
+    rust_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl MetalGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: MetalConfig) -> Self {
-        Self { config }
+        let fbm_scratch: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(5);
+
+        let fbm_rust: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(41)).set_octaves(4);
+        let rust_noise = ToroidalNoise::new(fbm_rust, config.scale * 0.4);
+
+        Self {
+            config,
+            fbm_scratch,
+            rust_noise,
+        }
     }
 }
 
@@ -94,13 +114,8 @@ impl TextureGenerator for MetalGenerator {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        // Scratch / micro-detail noise.
-        let fbm_scratch: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(5);
-
         // Rust patches — separate seed, low frequency for large blotches.
-        let fbm_rust: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(41)).set_octaves(4);
-        let rust_noise = ToroidalNoise::new(fbm_rust, c.scale * 0.4);
-        let rust_grid = sample_grid(&rust_noise, width, height);
+        let rust_grid = sample_grid(&self.rust_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;
@@ -137,14 +152,14 @@ impl TextureGenerator for MetalGenerator {
                         let ny = (TAU * u).sin() * c.scale * c.brush_stretch;
                         let nz = (TAU * v).cos() * c.scale * 0.12;
                         let nw = (TAU * v).sin() * c.scale * 0.12;
-                        fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
+                        self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
                     }
                     MetalStyle::StandingSeam => {
                         let nx = (TAU * u).cos() * c.scale;
                         let ny = (TAU * u).sin() * c.scale;
                         let nz = (TAU * v).cos() * c.scale;
                         let nw = (TAU * v).sin() * c.scale;
-                        fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
+                        self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
                     }
                 };
 

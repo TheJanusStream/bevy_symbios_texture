@@ -59,13 +59,37 @@ impl Default for ShingleConfig {
 }
 
 /// Procedural roof-shingle / tile texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using a [`ShingleConfig`].  Construct
+/// via [`ShingleGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::shingle`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct ShingleGenerator {
     config: ShingleConfig,
+    surf_noise: ToroidalNoise<Fbm<Perlin>>,
+    moss_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl ShingleGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: ShingleConfig) -> Self {
-        Self { config }
+        let fbm_surf: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(4);
+        let surf_noise = ToroidalNoise::new(fbm_surf, config.scale * 3.0);
+
+        let fbm_moss: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(100)).set_octaves(3);
+        let moss_noise = ToroidalNoise::new(fbm_moss, config.scale * 1.5);
+
+        Self {
+            config,
+            surf_noise,
+            moss_noise,
+        }
     }
 }
 
@@ -75,14 +99,10 @@ impl TextureGenerator for ShingleGenerator {
         let c = &self.config;
 
         // Surface micro-detail FBM (toroidal for seamless tiling).
-        let fbm_surf: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(4);
-        let surf_noise = ToroidalNoise::new(fbm_surf, c.scale * 3.0);
-        let surf_grid = sample_grid(&surf_noise, width, height);
+        let surf_grid = sample_grid(&self.surf_noise, width, height);
 
         // Moss noise — low frequency, toroidal.
-        let fbm_moss: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(100)).set_octaves(3);
-        let moss_noise = ToroidalNoise::new(fbm_moss, c.scale * 1.5);
-        let moss_grid = sample_grid(&moss_noise, width, height);
+        let moss_grid = sample_grid(&self.moss_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

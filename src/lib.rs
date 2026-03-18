@@ -62,7 +62,8 @@ pub mod window;
 pub mod ui;
 
 pub use generator::{
-    GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images, map_to_images_card,
+    GeneratedHandles, TextureError, TextureGenerator, TextureMap, Workspace, map_to_images,
+    map_to_images_card,
 };
 pub use leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
 pub use noise::ToroidalNoise;

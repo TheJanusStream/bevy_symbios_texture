@@ -46,15 +46,27 @@ impl Default for StuccoConfig {
 
 /// Procedural stucco / render texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::async_gen::PendingTexture::stucco`] / [`crate::generator::map_to_images`].
+/// Drives [`TextureGenerator::generate`] using a [`StuccoConfig`].  Construct
+/// via [`StuccoGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::stucco`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct StuccoGenerator {
     config: StuccoConfig,
+    noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl StuccoGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: StuccoConfig) -> Self {
-        Self { config }
+        let fbm: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let noise = ToroidalNoise::new(fbm, config.scale);
+        Self { config, noise }
     }
 }
 
@@ -63,9 +75,7 @@ impl TextureGenerator for StuccoGenerator {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        let fbm: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(c.octaves);
-        let noise = ToroidalNoise::new(fbm, c.scale);
-        let heights = sample_grid(&noise, width, height);
+        let heights = sample_grid(&self.noise, width, height);
 
         let n = (width as usize) * (height as usize);
         let mut albedo = vec![0u8; n * 4];

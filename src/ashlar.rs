@@ -68,13 +68,37 @@ impl Default for AshlarConfig {
 }
 
 /// Procedural ashlar (cut-stone masonry) texture generator.
+///
+/// Drives [`TextureGenerator::generate`] using an [`AshlarConfig`].  Construct
+/// via [`AshlarGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::ashlar`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct AshlarGenerator {
     config: AshlarConfig,
+    rough_noise: ToroidalNoise<Fbm<Perlin>>,
+    chisel_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl AshlarGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: AshlarConfig) -> Self {
-        Self { config }
+        let fbm_rough: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(5);
+        let rough_noise =
+            ToroidalNoise::new(fbm_rough, config.cols as f64 * config.rows as f64 * 0.8);
+        let fbm_chisel: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(200)).set_octaves(3);
+        let chisel_noise =
+            ToroidalNoise::new(fbm_chisel, config.cols as f64 * config.rows as f64 * 2.5);
+        Self {
+            config,
+            rough_noise,
+            chisel_noise,
+        }
     }
 }
 
@@ -84,14 +108,10 @@ impl TextureGenerator for AshlarGenerator {
         let c = &self.config;
 
         // Toroidal FBM for stone-face micro-detail and chisel approximation.
-        let fbm_rough: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(5);
-        let rough_noise = ToroidalNoise::new(fbm_rough, c.cols as f64 * c.rows as f64 * 0.8);
-        let rough_grid = sample_grid(&rough_noise, width, height);
+        let rough_grid = sample_grid(&self.rough_noise, width, height);
 
         // Second FBM at higher frequency for fine chisel/crack detail.
-        let fbm_chisel: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(200)).set_octaves(3);
-        let chisel_noise = ToroidalNoise::new(fbm_chisel, c.cols as f64 * c.rows as f64 * 2.5);
-        let chisel_grid = sample_grid(&chisel_noise, width, height);
+        let chisel_grid = sample_grid(&self.chisel_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

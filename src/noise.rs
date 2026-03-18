@@ -62,17 +62,24 @@ impl<N: NoiseFn<f64, 4>> ToroidalNoise<N> {
     }
 }
 
-/// Convenience: iterate over a `width × height` grid and collect samples.
+/// Sample noise into a pre-allocated buffer, resizing it to `width * height`.
 ///
-/// Returns a `Vec<f64>` of length `width * height`, values in `[-1, 1]`.
+/// This is the allocation-friendly variant of [`sample_grid`].  Pass the same
+/// `Vec` across multiple generation calls (or via a [`Workspace`]) to reuse
+/// its heap allocation rather than allocating a fresh 128 MB buffer per grid
+/// at 4096×4096.
 ///
-/// Torus coordinates are precomputed into lookup tables of size `W` and `H`,
-/// reducing trigonometric calls from `O(W × H)` to `O(W + H)`.
-pub fn sample_grid<N: NoiseFn<f64, 4>>(
+/// Values are in `[-1, 1]`.  Torus coordinates are precomputed into lookup
+/// tables of size `W` and `H`, reducing trigonometric calls from `O(W × H)`
+/// to `O(W + H)`.
+///
+/// [`Workspace`]: crate::generator::Workspace
+pub fn sample_grid_into<N: NoiseFn<f64, 4>>(
     noise: &ToroidalNoise<N>,
     width: u32,
     height: u32,
-) -> Vec<f64> {
+    out: &mut Vec<f64>,
+) {
     let w = width as usize;
     let h = height as usize;
     let freq = noise.frequency;
@@ -91,7 +98,8 @@ pub fn sample_grid<N: NoiseFn<f64, 4>>(
         .map(|y| (TAU * y as f64 / h as f64).sin() * freq)
         .collect();
 
-    let mut out = Vec::with_capacity(w * h);
+    out.clear();
+    out.reserve(w * h);
     for y in 0..h {
         let nz = row_cos[y];
         let nw = row_sin[y];
@@ -99,6 +107,23 @@ pub fn sample_grid<N: NoiseFn<f64, 4>>(
             out.push(noise.get_precomputed(col_cos[x], col_sin[x], nz, nw));
         }
     }
+}
+
+/// Convenience: iterate over a `width × height` grid and collect samples.
+///
+/// Returns a `Vec<f64>` of length `width * height`, values in `[-1, 1]`.
+///
+/// For high-resolution textures (≥ 2048) where multiple grids are needed,
+/// prefer [`sample_grid_into`] with a [`Workspace`] to reuse allocations.
+///
+/// [`Workspace`]: crate::generator::Workspace
+pub fn sample_grid<N: NoiseFn<f64, 4>>(
+    noise: &ToroidalNoise<N>,
+    width: u32,
+    height: u32,
+) -> Vec<f64> {
+    let mut out = Vec::new();
+    sample_grid_into(noise, width, height, &mut out);
     out
 }
 

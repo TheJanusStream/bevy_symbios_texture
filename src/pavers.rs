@@ -70,15 +70,28 @@ impl Default for PaversConfig {
 
 /// Procedural pavers / tiles texture generator.
 ///
-/// Produces tileable albedo, normal, and ORM maps.  Upload via
-/// [`crate::async_gen::PendingTexture::pavers`] / [`crate::generator::map_to_images`].
+/// Drives [`TextureGenerator::generate`] using a [`PaversConfig`].  Construct
+/// via [`PaversGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::pavers`] task for non-blocking generation.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct PaversGenerator {
     config: PaversConfig,
+    surf_noise: ToroidalNoise<Fbm<Perlin>>,
 }
 
 impl PaversGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: PaversConfig) -> Self {
-        Self { config }
+        let fbm: Fbm<Perlin> = Fbm::new(config.seed.wrapping_add(50)).set_octaves(4);
+        let surf_noise = ToroidalNoise::new(fbm, config.scale * 2.0);
+
+        Self { config, surf_noise }
     }
 }
 
@@ -88,9 +101,7 @@ impl TextureGenerator for PaversGenerator {
         let c = &self.config;
 
         // Surface micro-detail FBM.
-        let fbm: Fbm<Perlin> = Fbm::new(c.seed.wrapping_add(50)).set_octaves(4);
-        let surf_noise = ToroidalNoise::new(fbm, c.scale * 2.0);
-        let surf_grid = sample_grid(&surf_noise, width, height);
+        let surf_grid = sample_grid(&self.surf_noise, width, height);
 
         let w = width as usize;
         let h = height as usize;

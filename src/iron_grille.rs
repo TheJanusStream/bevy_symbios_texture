@@ -59,17 +59,29 @@ impl Default for IronGrilleConfig {
 
 /// Procedural iron grille / portcullis texture generator (alpha-card type).
 ///
+/// Drives [`TextureGenerator::generate`] using an [`IronGrilleConfig`].  Construct
+/// via [`IronGrilleGenerator::new`] and call `generate` directly, or spawn a
+/// [`crate::async_gen::PendingTexture::iron_grille`] task for non-blocking generation.
+///
 /// The result has per-pixel alpha: fully transparent in the openings between
-/// bars, and fully opaque on the bars themselves.  Upload via
-/// [`crate::generator::map_to_images_card`] to select the clamp-to-edge
-/// sampler automatically.
+/// bars, and fully opaque on the bars themselves.
+///
+/// Noise objects are built in the constructor so that calling `generate`
+/// multiple times (e.g. producing size variants of the same material)
+/// does not repeat the initialisation cost.
 pub struct IronGrilleGenerator {
     config: IronGrilleConfig,
+    rust_fbm: Fbm<Perlin>,
 }
 
 impl IronGrilleGenerator {
+    /// Create a new generator with the given configuration.
+    ///
+    /// Builds the noise objects up front so that repeated
+    /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: IronGrilleConfig) -> Self {
-        Self { config }
+        let rust_fbm: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(4);
+        Self { config, rust_fbm }
     }
 }
 
@@ -77,9 +89,6 @@ impl TextureGenerator for IronGrilleGenerator {
     fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
-
-        // Non-toroidal FBM for rust distribution — card texture, no tiling needed.
-        let rust_fbm: Fbm<Perlin> = Fbm::new(c.seed).set_octaves(4);
 
         let w = width as usize;
         let h = height as usize;
@@ -147,7 +156,7 @@ impl TextureGenerator for IronGrilleGenerator {
                 let is_joint = min_v_sdf <= 0.0 && min_h_sdf <= 0.0;
 
                 // Rust noise — sample at medium frequency so it blotches naturally.
-                let rust_raw = rust_fbm.get([u * 8.0, v * 8.0]) * 0.5 + 0.5; // [0, 1]
+                let rust_raw = self.rust_fbm.get([u * 8.0, v * 8.0]) * 0.5 + 0.5; // [0, 1]
                 let joint_boost = if is_joint { 1.5_f64 } else { 0.5_f64 };
                 let rust_t = (rust_raw * c.rust_level * joint_boost).clamp(0.0, 1.0);
 
