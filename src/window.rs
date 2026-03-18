@@ -147,21 +147,22 @@ impl TextureGenerator for WindowGenerator {
                     let pu = (gu * panes_x as f64).fract();
                     let pv = (gv * panes_y as f64).fract();
 
+                    // Mullion half-width scaled to pane-local coordinates so that
+                    // internal mullions have the same physical thickness regardless
+                    // of how many panes there are.
+                    let mhx = mullion_half * panes_x as f64;
+                    let mhy = mullion_half * panes_y as f64;
+
                     // Check if we're on an internal mullion line.
                     // The outer boundary lines coincide with the frame so panes_x=1 never
                     // produces spurious mullions inside the glass.
                     let is_mullion_x = panes_x > 1
-                        && (pu < mullion_half
-                            || pu > 1.0 - mullion_half
-                            || gu < mullion_half / panes_x as f64
-                            || gu > 1.0 - mullion_half / panes_x as f64);
+                        && (pu < mhx || pu > 1.0 - mhx);
                     let is_mullion_y = panes_y > 1
-                        && (pv < mullion_half
-                            || pv > 1.0 - mullion_half
-                            || gv < mullion_half / panes_y as f64
-                            || gv > 1.0 - mullion_half / panes_y as f64);
+                        && (pv < mhy || pv > 1.0 - mhy);
 
-                    // For single-pane axis, still suppress the outer boundary band.
+                    // For single-pane axis, still suppress the outer boundary band
+                    // using the same thickness as internal mullions (in glass-UV).
                     let at_x_border = gu < mullion_half || gu > 1.0 - mullion_half;
                     let at_y_border = gv < mullion_half || gv > 1.0 - mullion_half;
 

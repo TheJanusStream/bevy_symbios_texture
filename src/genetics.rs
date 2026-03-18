@@ -462,6 +462,10 @@ impl Genotype for BrickConfig {
         self.seed = mutate_seed(self.seed, rng, rate);
         self.scale = mutate_f64(self.scale, rng, rate, 1.0, 1.0, 12.0).round();
         self.row_offset = mutate_f64(self.row_offset, rng, rate, 0.1, 0.0, 1.0);
+        // Snap so that scale * row_offset is an integer — required for vertical tiling.
+        if self.scale > 0.0 {
+            self.row_offset = (self.scale * self.row_offset).round() / self.scale;
+        }
         self.aspect_ratio = mutate_f64(self.aspect_ratio, rng, rate, 0.3, 1.0, 4.0);
         self.mortar_size = mutate_f64(self.mortar_size, rng, rate, 0.03, 0.01, 0.35);
         self.bevel = mutate_f64(self.bevel, rng, rate, 0.2, 0.0, 1.0);
@@ -473,7 +477,7 @@ impl Genotype for BrickConfig {
     }
 
     fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
-        Self {
+        let mut child = Self {
             seed: if rng.random::<bool>() {
                 self.seed
             } else {
@@ -521,7 +525,12 @@ impl Genotype for BrickConfig {
             } else {
                 other.normal_strength
             },
+        };
+        // Snap row_offset so scale * row_offset is integer (tiling invariant).
+        if child.scale > 0.0 {
+            child.row_offset = (child.scale * child.row_offset).round() / child.scale;
         }
+        child
     }
 }
 
@@ -666,6 +675,10 @@ impl Genotype for ShingleConfig {
         self.shape_profile = mutate_f64(self.shape_profile, rng, rate, 0.2, 0.0, 1.0);
         self.overlap = mutate_f64(self.overlap, rng, rate, 0.1, 0.0, 0.8);
         self.stagger = mutate_f64(self.stagger, rng, rate, 0.15, 0.0, 1.0);
+        // Snap so that scale * stagger is an integer — required for vertical tiling.
+        if self.scale > 0.0 {
+            self.stagger = (self.scale * self.stagger).round() / self.scale;
+        }
         self.moss_level = mutate_f64(self.moss_level, rng, rate, 0.1, 0.0, 1.0);
         self.color_tile = mutate_color3(self.color_tile, rng, rate, 0.07);
         self.color_grout = mutate_color3(self.color_grout, rng, rate, 0.07);
@@ -673,7 +686,7 @@ impl Genotype for ShingleConfig {
     }
 
     fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
-        Self {
+        let mut child = Self {
             seed: if rng.random::<bool>() {
                 self.seed
             } else {
@@ -711,7 +724,12 @@ impl Genotype for ShingleConfig {
             } else {
                 other.normal_strength
             },
+        };
+        // Snap stagger so scale * stagger is integer (tiling invariant).
+        if child.scale > 0.0 {
+            child.stagger = (child.scale * child.stagger).round() / child.scale;
         }
+        child
     }
 }
 

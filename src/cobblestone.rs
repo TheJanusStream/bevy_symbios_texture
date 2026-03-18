@@ -81,7 +81,8 @@ impl TextureGenerator for CobblestoneGenerator {
 
         // Gap threshold in UV distance units: stones end where the Voronoi
         // boundary is closer than this value.
-        let gap_threshold = c.gap_width / c.scale;
+        let scale = c.scale.round().max(1.0);
+        let gap_threshold = c.gap_width / scale;
 
         let mut heights = vec![0.0f64; n];
         let mut albedo = vec![0u8; n * 4];
@@ -98,7 +99,7 @@ impl TextureGenerator for CobblestoneGenerator {
 
                 // Grid-based toroidal Voronoi: returns F1, F2, and the integer
                 // cell coordinates of the nearest site.
-                let (f1, f2, ci, cj) = voronoi(u, v, c.scale, c.seed);
+                let (f1, f2, ci, cj) = voronoi(u, v, c.scale.round().max(1.0), c.seed);
 
                 let h_val;
                 let (r, g, b);

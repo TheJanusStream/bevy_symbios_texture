@@ -230,21 +230,23 @@ fn square_cell(
 fn hex_cell(u: f64, v: f64, scale: f64) -> (f64, i64, i64) {
     const SQRT3: f64 = 1.732_050_807_568_877_3;
 
-    // Horizontal tiling requires an integer number of columns; round scale.
+    // Vertical tiling requires an integer number of rows; round scale.
     let scale = scale.round().max(1.0);
-    // Circumradius so that `scale` flat-top hexes fit exactly across [0, 1].
+    // Circumradius so that `scale` hex rows fit exactly across [0, 1] vertically.
+    // Row spacing = hex_r * √3, so scale rows require hex_r = 1 / (scale * √3).
     let hex_r = 1.0 / (scale * SQRT3);
 
-    // The natural (float) number of rows in [0,1]: scale * sqrt(3) / 1.5.
-    // Round to nearest integer so the grid tiles vertically without a seam.
-    let rows_float = scale * SQRT3 / 1.5;
-    let rows_int = rows_float.round().max(1.0);
-    // Stretch v so that rows_int hex rows span [0, 1] exactly.
-    let vs = v * (rows_float / rows_int);
+    // The natural (float) number of horizontal columns in [0,1].
+    // Column spacing = 1.5 * hex_r, so cols = 1 / (1.5 * hex_r) = scale * √3 / 1.5.
+    // This is generally not an integer, so stretch u to make it tile.
+    let cols_float = scale * SQRT3 / 1.5;
+    let cols_int = cols_float.round().max(1.0);
+    // Stretch u so that cols_int hex columns span [0, 1] exactly.
+    let us = u * (cols_float / cols_int);
 
     // Convert to fractional axial coordinates (flat-top convention).
-    let qf = (2.0 / 3.0) * u / hex_r;
-    let rf = (-1.0 / 3.0) * u / hex_r + (SQRT3 / 3.0) * vs / hex_r;
+    let qf = (2.0 / 3.0) * us / hex_r;
+    let rf = (-1.0 / 3.0) * us / hex_r + (SQRT3 / 3.0) * v / hex_r;
     let sf = -qf - rf;
 
     // Cube-round to nearest hex center.
@@ -255,8 +257,8 @@ fn hex_cell(u: f64, v: f64, scale: f64) -> (f64, i64, i64) {
     let cy = hex_r * (SQRT3 / 2.0 * q as f64 + SQRT3 * r as f64);
 
     // Evaluate the SDF in stretched space (hexes are slightly non-regular).
-    let dx = u - cx;
-    let dy = vs - cy;
+    let dx = us - cx;
+    let dy = v - cy;
     let sdf = hex_sdf(dx, dy, hex_r);
 
     (sdf, q, r)
