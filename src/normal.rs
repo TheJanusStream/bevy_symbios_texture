@@ -87,15 +87,15 @@ pub fn height_to_normal(
             let dx = (right - left) * s * w as f64 / x_dist;
             let dy = (below - above) * s * h as f64 / y_dist;
 
-            // Normal = normalize(-dx, dy, 1) in Bevy / OpenGL tangent space.
+            // Normal = normalize(-dx, -dy, 1) in Bevy / OpenGL tangent space.
             //
             // X: negate because a rightward slope tilts the normal leftward.
-            // Y: no negation — Bevy's bitangent points toward –V (up in image),
-            //    so a positive dH/dV (below > above) yields a positive Y
-            //    component (normal tilts toward the top of the texture).
+            // Y: negate because Bevy's bitangent points toward +V (down in image),
+            //    so a positive dH/dV (below > above) requires a negative Y
+            //    component to tilt the normal toward the top of the texture (-V).
             let len = (dx * dx + dy * dy + 1.0).sqrt();
             let nx = -dx / len;
-            let ny = dy / len;
+            let ny = -dy / len;
             let nz = 1.0 / len;
 
             let idx = (y * w + x) * 4;
