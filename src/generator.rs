@@ -50,6 +50,9 @@ pub struct TextureMap {
 }
 
 /// Handles returned after uploading a [`TextureMap`] into Bevy's asset system.
+///
+/// Cloning is cheap — `Handle<Image>` is a reference-counted asset id.
+#[derive(Clone)]
 pub struct GeneratedHandles {
     /// Handle to the albedo (colour) image.
     pub albedo: Handle<Image>,

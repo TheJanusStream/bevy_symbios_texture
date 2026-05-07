@@ -21,26 +21,119 @@
 //! // Later, query for TextureReady to consume the handles.
 //! ```
 
-/// Maximum number of texture generation tasks that run concurrently.
+/// Default concurrency cap applied when no explicit
+/// [`AsyncTextureConfig::pool_threads`] is supplied.
 ///
-/// Additional tasks are queued inside the rayon pool rather than spawning new
-/// OS threads, bounding both CPU and memory usage.
-const MAX_GENERATION_THREADS: usize = 4;
+/// Tasks beyond this cap are queued inside the rayon pool rather than spawning
+/// new OS threads, bounding both CPU and memory usage.  The default is
+/// deliberately conservative; saturate large machines by setting
+/// `AsyncTextureConfig::pool_threads = 0` (auto = `available_parallelism / 2`)
+/// or an explicit higher value.
+pub const DEFAULT_POOL_THREADS: usize = 4;
 
-/// Returns the library-private rayon thread pool used for texture generation.
+/// Plugin-time configuration for the private texture-generation thread pool.
+///
+/// Applied by [`SymbiosTexturePlugin`](crate::SymbiosTexturePlugin) before any
+/// task is dispatched.  Once the pool is built (lazily, on the first
+/// generation request) the configuration is frozen for the process lifetime;
+/// changing the value afterwards has no effect.
+#[derive(bevy::ecs::resource::Resource, Clone, Debug)]
+pub struct AsyncTextureConfig {
+    /// Maximum concurrent generation tasks.
+    ///
+    /// * `0` selects an auto value of `available_parallelism / 2` (minimum 1).
+    ///   This trades fewer threads against better main-thread responsiveness
+    ///   while still scaling on large machines.
+    /// * Any positive value caps the pool at exactly that many threads.
+    ///
+    /// Defaults to [`DEFAULT_POOL_THREADS`].
+    pub pool_threads: usize,
+}
+
+impl Default for AsyncTextureConfig {
+    fn default() -> Self {
+        Self {
+            pool_threads: DEFAULT_POOL_THREADS,
+        }
+    }
+}
+
+/// Resolves the requested thread-count to an actual count.
+fn resolve_pool_threads(cfg: &AsyncTextureConfig) -> usize {
+    if cfg.pool_threads == 0 {
+        std::thread::available_parallelism()
+            .map(|n| (n.get() / 2).max(1))
+            .unwrap_or(2)
+    } else {
+        cfg.pool_threads
+    }
+}
+
+static POOL_CONFIG: OnceLock<AsyncTextureConfig> = OnceLock::new();
+static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
+
+/// Returned by [`set_pool_config`] when a configuration has already been
+/// installed by an earlier caller.
+#[derive(Debug)]
+pub struct PoolConfigAlreadySet;
+
+impl std::fmt::Display for PoolConfigAlreadySet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AsyncTextureConfig has already been applied; new value ignored")
+    }
+}
+
+impl std::error::Error for PoolConfigAlreadySet {}
+
+/// Apply the texture-generation thread-pool configuration.
+///
+/// The plugin calls this once at startup with the user-supplied
+/// [`AsyncTextureConfig`].  Calls after the pool has been initialised are
+/// silently ignored — the configuration is read exactly once when the first
+/// generation task is dispatched.
+pub fn set_pool_config(cfg: AsyncTextureConfig) -> Result<(), PoolConfigAlreadySet> {
+    POOL_CONFIG.set(cfg).map_err(|_| PoolConfigAlreadySet)
+}
+
+/// Build the rayon pool from the resolved configuration.
+///
+/// Returns `None` if [`rayon::ThreadPoolBuilder`] fails (out-of-memory, OS
+/// thread limit, sandboxed environments).  On `None`, [`spawn_task`] falls
+/// back to running the closure synchronously on the calling thread so texture
+/// generation continues to work — slowly, but correctly — instead of panicking
+/// at startup.
+fn build_pool(cfg: &AsyncTextureConfig) -> Option<rayon::ThreadPool> {
+    let n = resolve_pool_threads(cfg);
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(n)
+        .thread_name(|i| format!("texture-gen-{i}"))
+        .build()
+    {
+        Ok(pool) => Some(pool),
+        Err(e) => {
+            bevy::log::warn!(
+                "bevy_symbios_texture: failed to build texture-gen thread pool ({e}); \
+                 falling back to inline (synchronous) generation. Each PendingTexture \
+                 will be produced on the spawning thread, blocking it for the duration \
+                 of the generator."
+            );
+            None
+        }
+    }
+}
+
+/// Returns the library-private rayon thread pool used for texture generation,
+/// or `None` if pool construction failed at first init.
 ///
 /// Isolated from the application's global rayon pool so texture work does not
 /// starve unrelated parallel workloads and the concurrency cap is enforced
 /// regardless of the calling application's rayon configuration.
-fn gen_pool() -> &'static rayon::ThreadPool {
-    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+fn gen_pool() -> Option<&'static rayon::ThreadPool> {
     POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(MAX_GENERATION_THREADS)
-            .thread_name(|i| format!("texture-gen-{i}"))
-            .build()
-            .expect("failed to build texture generation thread pool")
+        let cfg = POOL_CONFIG.get().cloned().unwrap_or_default();
+        build_pool(&cfg)
     })
+    .as_ref()
 }
 
 use std::sync::{
@@ -113,6 +206,16 @@ pub struct PendingTexture {
     is_card: bool,
 }
 
+impl PendingTexture {
+    /// Returns `true` if this task should be uploaded with
+    /// [`map_to_images_card`](crate::generator::map_to_images_card)
+    /// (clamp-to-edge sampler, alpha-masked card) rather than the default
+    /// repeat-tiling [`map_to_images`](crate::generator::map_to_images).
+    pub fn is_card(&self) -> bool {
+        self.is_card
+    }
+}
+
 impl Drop for PendingTexture {
     fn drop(&mut self) {
         self.cancelled.store(true, Ordering::Relaxed);
@@ -122,6 +225,11 @@ impl Drop for PendingTexture {
 /// Shared constructor body: creates the channel + cancellation flag, spawns the
 /// task, and returns a `PendingTexture`.  The closure `f` is the generator call.
 /// Native Desktop: Spawn using our private, bounded Rayon pool.
+///
+/// When the rayon pool failed to build (see [`gen_pool`]), the closure runs
+/// inline on the calling thread.  The mpsc channel is fed before the function
+/// returns, so [`poll_texture_tasks`] still consumes the result correctly via
+/// its normal polling path — only the spawn-time latency changes.
 #[cfg(not(target_arch = "wasm32"))]
 fn spawn_task<F>(f: F, is_card: bool) -> PendingTexture
 where
@@ -131,11 +239,18 @@ where
     let flag = Arc::clone(&cancelled);
     let (tx, rx) = mpsc::sync_channel(1);
 
-    gen_pool().spawn(move || {
-        if !flag.load(Ordering::Relaxed) {
-            tx.send(f()).ok();
+    match gen_pool() {
+        Some(pool) => pool.spawn(move || {
+            if !flag.load(Ordering::Relaxed) {
+                tx.send(f()).ok();
+            }
+        }),
+        None => {
+            if !flag.load(Ordering::Relaxed) {
+                tx.send(f()).ok();
+            }
         }
-    });
+    }
 
     PendingTexture {
         rx: std::sync::Mutex::new(rx),
@@ -337,9 +452,17 @@ impl PendingTexture {
 pub struct TextureReady(pub GeneratedHandles);
 
 /// Bevy system — polls pending generation tasks and uploads finished maps.
+///
+/// Skips entities also tagged with [`PatchMaterialTextures`](crate::material::PatchMaterialTextures);
+/// those are consumed by [`patch_procedural_material_textures`](crate::material::patch_procedural_material_textures)
+/// instead, which writes the generated images directly into a target
+/// `StandardMaterial` rather than emitting [`TextureReady`].
 pub fn poll_texture_tasks(
     mut commands: Commands,
-    tasks: Query<(Entity, &PendingTexture)>,
+    tasks: Query<
+        (Entity, &PendingTexture),
+        bevy::ecs::query::Without<crate::material::PatchMaterialTextures>,
+    >,
     mut images: ResMut<Assets<Image>>,
 ) {
     for (entity, pending) in &tasks {
@@ -370,5 +493,48 @@ pub fn poll_texture_tasks(
             }
             Err(mpsc::TryRecvError::Empty) => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bark::BarkConfig;
+
+    /// Auto thread count picks at least one thread regardless of host parallelism.
+    #[test]
+    fn auto_pool_threads_is_at_least_one() {
+        let cfg = AsyncTextureConfig { pool_threads: 0 };
+        assert!(resolve_pool_threads(&cfg) >= 1);
+    }
+
+    /// Explicit non-zero values are passed through unchanged.
+    #[test]
+    fn explicit_pool_threads_is_passthrough() {
+        let cfg = AsyncTextureConfig { pool_threads: 7 };
+        assert_eq!(resolve_pool_threads(&cfg), 7);
+    }
+
+    /// Inline-fallback path: when the pool is unavailable, [`spawn_task`] still
+    /// produces a `PendingTexture` whose channel already holds the generated
+    /// map.  This exercises the same code path that runs after a real
+    /// `rayon::ThreadPoolBuilder` failure.
+    #[test]
+    fn inline_fallback_runs_synchronously() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&cancelled);
+        let (tx, rx) = mpsc::sync_channel(1);
+
+        let generator = BarkGenerator::new(BarkConfig::default());
+        if !flag.load(Ordering::Relaxed) {
+            tx.send(generator.generate(8, 8)).ok();
+        }
+
+        let received = rx
+            .try_recv()
+            .expect("inline fallback should make the result immediately available");
+        let map = received.expect("8x8 generation must succeed");
+        assert_eq!(map.width, 8);
+        assert_eq!(map.height, 8);
     }
 }

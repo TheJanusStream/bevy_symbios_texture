@@ -12,16 +12,16 @@ do not tile.
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.3                  | 0.18 |
+| 0.4                  | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.3"
+bevy_symbios_texture = "0.4"
 
 # Optional: egui editor panel (required for the texture_viewer example)
-bevy_symbios_texture = { version = "0.3", features = ["egui"] }
+bevy_symbios_texture = { version = "0.4", features = ["egui"] }
 ```
 
 ## Quick start
@@ -53,14 +53,21 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 
 ### Asynchronous (non-blocking, recommended)
 
-Offloads pixel math to a private, bounded rayon thread pool (capped at 4
-concurrent tasks) so the main thread is never stalled. On WASM, falls back to
-Bevy's `AsyncComputeTaskPool`.
+Offloads pixel math to a private, bounded rayon thread pool (default 4
+concurrent tasks; configurable via `AsyncTextureConfig::pool_threads`) so the
+main thread is never stalled. On WASM, falls back to Bevy's
+`AsyncComputeTaskPool`.
+
+If `rayon::ThreadPoolBuilder::build()` fails at first init (out-of-memory, OS
+thread limit, sandboxed environments) the library logs a warning and falls
+back to running each generator inline on the calling thread.  Texture
+generation still works — slower and blocking the spawning thread — instead of
+panicking.
 
 ```rust
 use bevy::prelude::*;
 use bevy_symbios_texture::{
-    SymbiosTexturePlugin,
+    AsyncTextureConfig, SymbiosTexturePlugin,
     async_gen::{PendingTexture, TextureReady},
     bark::BarkConfig,
 };
@@ -68,7 +75,13 @@ use bevy_symbios_texture::{
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_plugins(SymbiosTexturePlugin)   // registers the polling system
+        // Default pool: 4 concurrent tasks.
+        .add_plugins(SymbiosTexturePlugin::default())
+        // Or explicitly: 0 = auto (available_parallelism() / 2),
+        // any positive value = exact thread count.
+        // .add_plugins(SymbiosTexturePlugin {
+        //     config: AsyncTextureConfig { pool_threads: 0 },
+        // })
         .add_systems(Startup, spawn_task)
         .add_systems(Update, on_ready)
         .run();
@@ -91,6 +104,111 @@ fn on_ready(
 
 Dropping a `PendingTexture` entity before generation completes sets a
 cancellation flag; tasks that have not yet started exit without doing any work.
+
+### One-shot procedural materials
+
+`build_procedural_material_async` collapses the StandardMaterial-allocate +
+PendingTexture-spawn + post-completion-patch dance into a single call.  Define
+a `MaterialSettings` (PBR fields + a `TextureConfig` enum that selects the
+generator), call the helper, and use the returned handle immediately:
+
+```rust
+use bevy_symbios_texture::{
+    MaterialSettings, TextureConfig, build_procedural_material_async,
+    brick::BrickConfig,
+};
+
+fn spawn_brick_wall(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let settings = MaterialSettings {
+        base_color: [0.65, 0.30, 0.20],
+        roughness: 0.85,
+        texture: TextureConfig::Brick(BrickConfig::default()),
+        ..MaterialSettings::default()
+    };
+    let material = build_procedural_material_async(
+        &mut commands, &mut materials, &mut images, /*cache=*/ None,
+        &settings, 512, 512,
+    );
+    commands.spawn((Mesh3d(meshes.add(Cuboid::default())), MeshMaterial3d(material)));
+}
+```
+
+### Texture cache
+
+To avoid regenerating the same `(generator, config, size)` tuple across
+spawns, insert a `TextureCache` resource:
+
+```rust
+use bevy_symbios_texture::{DEFAULT_MEMORY_CACHE_ENTRIES, TextureCache};
+
+app.insert_resource(TextureCache::memory(DEFAULT_MEMORY_CACHE_ENTRIES));
+// or, for cross-process persistence:
+// app.insert_resource(TextureCache::file("./.texture-cache", manifest_version)?);
+```
+
+Cache hits return previously-uploaded `Handle<Image>` clones synchronously
+and skip the rayon dispatch entirely.  Bump `manifest_version` (or change a
+config field) to invalidate stale entries.
+
+The library ships two built-in stores — `MemoryStore` (LRU, default) and
+`FileStore` (binary blobs on disk) — and exposes the `TextureCacheStore`
+trait for custom backends.
+
+### Animated parameter curves
+
+Time-varying weathering, age, and seasonal change are first-class via the
+[`AnimatedProceduralMaterial`] component plus a small set of
+[`ParameterCurve`] impls (`Linear`, `EaseInOut`, `Stepped`, `ScriptedFn`).
+Attach the component to a material entity and the
+`tick_animated_procedural_materials` system regenerates the texture
+whenever the curve's output changes:
+
+```rust
+use bevy_symbios_texture::{
+    AnimatedProceduralMaterial, Linear, ParameterCurve, TextureConfig,
+    metal::MetalConfig,
+};
+
+let rust = Linear { from: 0.0_f64, to: 1.0, duration: 10.0 };
+let base = MetalConfig::default();
+let animator = AnimatedProceduralMaterial::new(material, 512, 512, move |t| {
+    TextureConfig::Metal(MetalConfig {
+        rust_level: rust.eval(t),
+        ..base.clone()
+    })
+})
+.with_min_regen_interval(0.25); // throttle regeneration to 4 Hz
+```
+
+Two thresholds gate regeneration: a wall-clock cooldown
+(`min_regen_interval`, default 0.25 s) and fingerprint equality.  Stepped
+or plateaued curves cost essentially nothing once the value stops changing.
+
+For sub-second smoothness across the steady-state pixels, drive a
+fragment-shader uniform on the material — generator output is RGBA8 and is
+the wrong knob for sub-frame interpolation.
+
+## Compute-shader fast path
+
+A wgpu compute-shader port of the hottest generators (FBM-based bark,
+brick, marble) is on the roadmap but **not implemented**.  The remaining
+work — porting toroidal noise to WGSL with bit-equivalent CPU/GPU output,
+dispatch + readback plumbing, a feature flag that swaps in the GPU path
+when available, and a benchmark suite — is multi-week and was deliberately
+deferred so this release could ship the asynchronous + cached + animated
+path on a known-good CPU baseline.
+
+If you need realtime texture editing at 60 FPS today, the alternatives are:
+
+* Bake the texture once via the regular CPU path and animate a material
+  uniform (rust mask weight, colour blend, etc.) in the fragment shader.
+* Use `AnimatedProceduralMaterial` with a coarse `min_regen_interval` and
+  accept the staircase update cadence.
 
 ## Generators
 
@@ -665,7 +783,7 @@ config types.
 
 ## Architecture
 
-```
+```text
 TextureGenerator (trait)
     │
     │  Tileable surface textures
@@ -723,7 +841,7 @@ eliminating repeated 128 MB+ allocations at 4096×4096 resolution.
 **Seamless tiling** is provided by [`ToroidalNoise`], which maps 2-D UV
 coordinates onto a 4-D torus so that noise wraps perfectly at every edge:
 
-```
+```text
 nx = cos(2π·u) · frequency
 ny = sin(2π·u) · frequency
 nz = cos(2π·v) · frequency

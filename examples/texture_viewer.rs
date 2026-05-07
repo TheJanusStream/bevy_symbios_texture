@@ -82,7 +82,7 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins((SymbiosTexturePlugin, EguiPlugin::default()))
+        .add_plugins((SymbiosTexturePlugin::default(), EguiPlugin::default()))
         .init_resource::<MaterialStore>()
         .init_resource::<CurrentSlot>()
         .init_resource::<ViewerRng>()
@@ -543,17 +543,17 @@ fn update_display(
 
     match &store.textures[slot] {
         Some((albedo, normal)) => {
-            if let Ok(mut sprite) = albedo_q.single_mut() {
-                if sprite.image != *albedo {
-                    sprite.image = albedo.clone();
-                    sprite.color = Color::WHITE;
-                }
+            if let Ok(mut sprite) = albedo_q.single_mut()
+                && sprite.image != *albedo
+            {
+                sprite.image = albedo.clone();
+                sprite.color = Color::WHITE;
             }
-            if let Ok(mut sprite) = normal_q.single_mut() {
-                if sprite.image != *normal {
-                    sprite.image = normal.clone();
-                    sprite.color = Color::WHITE;
-                }
+            if let Ok(mut sprite) = normal_q.single_mut()
+                && sprite.image != *normal
+            {
+                sprite.image = normal.clone();
+                sprite.color = Color::WHITE;
             }
             // Update cube material only when the albedo handle actually changed.
             if let Ok(cube_mat) = cube_q.single() {
@@ -561,12 +561,10 @@ fn update_display(
                     .get(&cube_mat.0)
                     .map(|m| m.base_color_texture.as_ref() != Some(albedo))
                     .unwrap_or(false);
-                if needs_update {
-                    if let Some(mat) = std_materials.get_mut(&cube_mat.0) {
-                        mat.base_color_texture = Some(albedo.clone());
-                        mat.normal_map_texture = Some(normal.clone());
-                        mat.base_color = Color::WHITE;
-                    }
+                if needs_update && let Some(mat) = std_materials.get_mut(&cube_mat.0) {
+                    mat.base_color_texture = Some(albedo.clone());
+                    mat.normal_map_texture = Some(normal.clone());
+                    mat.base_color = Color::WHITE;
                 }
             }
         }
@@ -584,12 +582,10 @@ fn update_display(
                     .get(&cube_mat.0)
                     .map(|m| m.base_color_texture.is_some())
                     .unwrap_or(false);
-                if needs_reset {
-                    if let Some(mat) = std_materials.get_mut(&cube_mat.0) {
-                        mat.base_color_texture = None;
-                        mat.normal_map_texture = None;
-                        mat.base_color = Color::srgb(0.4, 0.4, 0.4);
-                    }
+                if needs_reset && let Some(mat) = std_materials.get_mut(&cube_mat.0) {
+                    mat.base_color_texture = None;
+                    mat.normal_map_texture = None;
+                    mat.base_color = Color::srgb(0.4, 0.4, 0.4);
                 }
             }
         }

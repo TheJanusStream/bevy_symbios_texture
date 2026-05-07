@@ -179,6 +179,47 @@ fn bench_encaustic(c: &mut Criterion) {
     });
 }
 
+/// Cold-start vs cached: a brick generator at 512² is the cold cost; the
+/// cache hit is a `MemoryStore::peek_memory_only` lookup that returns
+/// pre-uploaded `Handle<Image>` clones without recomputing pixels.
+fn bench_cache_cold_vs_hot(c: &mut Criterion) {
+    use bevy_symbios_texture::{
+        MemoryStore, TextureCacheKey, TextureCacheStore, TextureConfig,
+        cache::DEFAULT_MEMORY_CACHE_ENTRIES, generator::GeneratedHandles,
+    };
+    use std::sync::Arc;
+
+    let cfg = TextureConfig::Brick(BrickConfig::default());
+    let key = TextureCacheKey {
+        kind: cfg.label(),
+        fingerprint: cfg.fingerprint(),
+        width: 512,
+        height: 512,
+    };
+    let mut store = MemoryStore::new(DEFAULT_MEMORY_CACHE_ENTRIES);
+    store.put(
+        key.clone(),
+        Arc::new(GeneratedHandles {
+            albedo: Default::default(),
+            normal: Default::default(),
+            roughness: Default::default(),
+        }),
+        false,
+        None,
+    );
+
+    let mut group = c.benchmark_group("cache_brick_512");
+
+    let generator = BrickGenerator::new(BrickConfig::default());
+    group.bench_function("cold_generate", |b| {
+        b.iter(|| generator.generate(black_box(512), black_box(512)))
+    });
+    group.bench_function("hot_lookup", |b| {
+        b.iter(|| store.peek_memory_only(black_box(&key)))
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_bark,
@@ -203,5 +244,6 @@ criterion_group!(
     bench_stained_glass,
     bench_iron_grille,
     bench_encaustic,
+    bench_cache_cold_vs_hot,
 );
 criterion_main!(benches);

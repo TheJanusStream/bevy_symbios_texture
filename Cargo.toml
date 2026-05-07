@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."
@@ -21,7 +21,7 @@ noise = "0.9"
 rand = "0.9"
 rayon = "1.11"
 serde = { version = "1.0", features = ["derive", "rc"] }
-symbios-genetics = "0.1"
+symbios-genetics = { path = "../symbios-genetics" }
 
 [dev-dependencies]
 serde_json = "1.0"
@@ -31,6 +31,12 @@ bevy_egui = "0.39"
 [[example]]
 name = "texture_viewer"
 required-features = ["egui"]
+
+[[example]]
+name = "procedural_material"
+
+[[example]]
+name = "animated_rust"
 
 [[bench]]
 name = "bench_main"
