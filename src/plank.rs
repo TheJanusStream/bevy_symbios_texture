@@ -23,6 +23,8 @@ use crate::{
 /// Configures the appearance of a [`PlankGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PlankConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of planks visible vertically.
     pub plank_count: f64,

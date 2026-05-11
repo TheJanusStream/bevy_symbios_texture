@@ -21,6 +21,8 @@ use crate::{
 /// Configures the appearance of a [`ShingleGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ShingleConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of shingle rows across the tile.
     pub scale: f64,

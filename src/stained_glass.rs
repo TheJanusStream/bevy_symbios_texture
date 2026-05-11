@@ -25,6 +25,8 @@ use crate::{
 /// Configures the appearance of a [`StainedGlassGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StainedGlassConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Approximate number of glass cells \[5, 25\].
     pub cell_count: usize,

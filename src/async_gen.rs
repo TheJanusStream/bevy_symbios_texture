@@ -1,11 +1,12 @@
 //! Async texture generation system.
 //!
 //! Offloads the CPU-intensive pixel math to a private, bounded [`rayon`]
-//! thread pool so it does not stall the main thread.  The pool is limited to
-//! [`MAX_GENERATION_THREADS`] concurrent tasks; excess requests are queued and
-//! run in order rather than spawning unbounded OS threads.  When a task
-//! finishes the images are uploaded to [`Assets<Image>`] and the result entity
-//! receives the [`TextureReady`] component.
+//! thread pool so it does not stall the main thread.  The pool size is
+//! controlled by [`AsyncTextureConfig::pool_threads`] (default
+//! [`DEFAULT_POOL_THREADS`]); excess requests are queued and run in order
+//! rather than spawning unbounded OS threads.  When a task finishes the
+//! images are uploaded to [`Assets<Image>`] and the result entity receives
+//! the [`TextureReady`] component.
 //!
 //! # Usage
 //! ```rust,ignore
@@ -184,13 +185,13 @@ use crate::{
 
 /// Spawned onto an entity to request background texture generation.
 ///
-/// Each constructor submits `generate()` to the private [`gen_pool`] rayon
-/// pool (capped at [`MAX_GENERATION_THREADS`] concurrent tasks).  Because
-/// `generate()` is a monolithic blocking loop with no yield points, using
-/// Bevy's `AsyncComputeTaskPool` would starve other tasks on that executor;
-/// a dedicated pool avoids the problem while bounding OS thread and memory
-/// usage.  [`poll_texture_tasks`] non-blockingly checks for completion each
-/// frame using [`mpsc::Receiver::try_recv`].
+/// Each constructor submits `generate()` to a private rayon pool sized by
+/// [`AsyncTextureConfig::pool_threads`] (default [`DEFAULT_POOL_THREADS`]).
+/// Because `generate()` is a monolithic blocking loop with no yield points,
+/// using Bevy's `AsyncComputeTaskPool` would starve other tasks on that
+/// executor; a dedicated pool avoids the problem while bounding OS thread
+/// and memory usage.  [`poll_texture_tasks`] non-blockingly checks for
+/// completion each frame using [`mpsc::Receiver::try_recv`].
 ///
 /// Dropping `PendingTexture` (e.g. when the entity is despawned) sets an
 /// atomic cancellation flag.  Tasks that have not yet started will see the
@@ -208,9 +209,8 @@ pub struct PendingTexture {
 
 impl PendingTexture {
     /// Returns `true` if this task should be uploaded with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card)
-    /// (clamp-to-edge sampler, alpha-masked card) rather than the default
-    /// repeat-tiling [`map_to_images`](crate::generator::map_to_images).
+    /// [`map_to_images_card`] (clamp-to-edge sampler, alpha-masked card)
+    /// rather than the default repeat-tiling [`map_to_images`].
     pub fn is_card(&self) -> bool {
         self.is_card
     }
@@ -309,7 +309,7 @@ impl PendingTexture {
     /// Spawn a leaf texture generation thread at `width × height` texels.
     ///
     /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// [`map_to_images_card`] automatically,
     /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
         let generator = LeafGenerator::new(config);
@@ -319,7 +319,7 @@ impl PendingTexture {
     /// Spawn a twig texture generation thread at `width × height` texels.
     ///
     /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// [`map_to_images_card`] automatically,
     /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
         let generator = TwigGenerator::new(config);
@@ -335,7 +335,7 @@ impl PendingTexture {
     /// Spawn a window texture generation thread at `width × height` texels.
     ///
     /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// [`map_to_images_card`] automatically,
     /// giving a clamp-to-edge sampler suitable for foliage cards.
     pub fn window(config: WindowConfig, width: u32, height: u32) -> Self {
         let generator = WindowGenerator::new(config);
@@ -423,7 +423,7 @@ impl PendingTexture {
     /// Spawn a stained glass texture generation thread at `width × height` texels.
     ///
     /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// [`map_to_images_card`] automatically,
     /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
     pub fn stained_glass(config: StainedGlassConfig, width: u32, height: u32) -> Self {
         let generator = StainedGlassGenerator::new(config);
@@ -433,7 +433,7 @@ impl PendingTexture {
     /// Spawn an iron grille / portcullis texture generation thread at `width × height` texels.
     ///
     /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`](crate::generator::map_to_images_card) automatically,
+    /// [`map_to_images_card`] automatically,
     /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
     pub fn iron_grille(config: IronGrilleConfig, width: u32, height: u32) -> Self {
         let generator = IronGrilleGenerator::new(config);

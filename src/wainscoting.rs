@@ -25,6 +25,8 @@ use crate::{
 /// Configures the appearance of a [`WainscotingGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct WainscotingConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Horizontal panel divisions \[1, 4\].
     pub panels_x: usize,

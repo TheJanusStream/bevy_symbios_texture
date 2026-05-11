@@ -24,10 +24,32 @@
 //! averaging: sRGB-linear averaging for albedo, renormalized averaging for
 //! normal maps, and direct linear averaging for ORM maps.
 //!
+//! # Plugin & async generation
+//! [`SymbiosTexturePlugin`] registers the polling systems and applies an
+//! [`AsyncTextureConfig`] to a private rayon thread pool dedicated to
+//! texture generation.  Spawn [`async_gen::PendingTexture`] components to
+//! offload work; the result lands on the entity as
+//! [`async_gen::TextureReady`].
+//!
+//! # Procedural materials
+//! [`build_procedural_material_async`] is a one-shot helper that returns a
+//! `Handle<StandardMaterial>` immediately and patches the generated textures
+//! in once the background task completes.  Pair with an optional
+//! [`TextureCache`] resource to avoid regenerating identical configs.
+//!
+//! # Animated parameters
+//! [`AnimatedProceduralMaterial`] drives time-varying texture parameters by
+//! re-evaluating a closure each frame, regenerating only when the
+//! fingerprint of the resulting [`TextureConfig`] changes (with a
+//! configurable wall-clock cooldown).
+//!
 //! # Genetics
 //! All config types implement `symbios_genetics::Genotype` (see [`genetics`]),
 //! making them compatible with evolutionary search algorithms such as
 //! `SimpleGA`, `Nsga2`, and `MapElites` from the `symbios-genetics` crate.
+//!
+//! [`TextureCache`]: cache::TextureCache
+//! [`TextureConfig`]: material::TextureConfig
 
 pub mod ashlar;
 pub mod asphalt;

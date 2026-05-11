@@ -14,6 +14,8 @@ use crate::{
 /// Configures the appearance of a [`RockGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RockConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Overall spatial scale.
     pub scale: f64,

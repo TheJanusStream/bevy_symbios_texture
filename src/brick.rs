@@ -22,6 +22,8 @@ use crate::{
 /// constraint (product = 2).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BrickConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of brick rows across the tile (controls coarseness).
     pub scale: f64,

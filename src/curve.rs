@@ -72,8 +72,11 @@ pub trait ParameterCurve<T>: Send + Sync {
 /// Holds at `to` for `t >= duration`.
 #[derive(Clone, Copy, Debug)]
 pub struct Linear<T> {
+    /// Value at `t = 0`.
     pub from: T,
+    /// Value at `t >= duration`.
     pub to: T,
+    /// Time (seconds) over which the curve interpolates from `from` to `to`.
     pub duration: f32,
 }
 
@@ -81,8 +84,11 @@ pub struct Linear<T> {
 /// Useful when a parameter should glide rather than ramp linearly.
 #[derive(Clone, Copy, Debug)]
 pub struct EaseInOut<T> {
+    /// Value at `t = 0`.
     pub from: T,
+    /// Value at `t >= duration`.
     pub to: T,
+    /// Time (seconds) over which the curve smoothsteps from `from` to `to`.
     pub duration: f32,
 }
 
@@ -188,8 +194,9 @@ pub type TextureCurve = Arc<dyn Fn(f32) -> TextureConfig + Send + Sync>;
 pub struct AnimatedProceduralMaterial {
     /// Material whose texture slots will be patched.
     pub material: Handle<StandardMaterial>,
-    /// Texture resolution for every regeneration.
+    /// Texture width (texels) for every regeneration.
     pub width: u32,
+    /// Texture height (texels) for every regeneration.
     pub height: u32,
     /// Closure: `t` (seconds since spawn) -> next `TextureConfig`.
     pub texture_curve: TextureCurve,

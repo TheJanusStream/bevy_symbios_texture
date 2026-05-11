@@ -29,6 +29,8 @@ use crate::{
 /// Configures the appearance of a [`BarkGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BarkConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Overall spatial scale of the bark pattern.
     pub scale: f64,

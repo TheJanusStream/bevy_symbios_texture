@@ -8,19 +8,28 @@
 //!
 //! Two storage backends ship with the crate:
 //!
-//! * [`MemoryStore`] — process-local `HashMap`.  Bounded by an LRU-trimmed
-//!   `max_entries`; entries that exceed the cap are dropped in insertion
-//!   order.  Use this for per-app caches (default biomes warm-up, hot
+//! * [`MemoryStore`] — process-local `HashMap` bounded by `max_entries`.
+//!   When the cap is reached, the oldest entry (by insertion order) is
+//!   dropped.  Re-inserting an existing key updates in place without
+//!   evicting.  Use this for per-app caches (default biomes warm-up, hot
 //!   parameter sweeps).
-//! * [`FileStore`] — disk-backed key/value store keyed by SipHash-13 of
-//!   the cache key.  Survives process restarts and lets a CLI tool warm
-//!   the cache from a manifest before the application launches.  Stored
-//!   blobs are raw RGBA8 levels (albedo + normal + ORM) and are re-uploaded
-//!   into [`Assets<Image>`] on the first hit.
+//! * [`FileStore`] — disk-backed key/value store keyed by the standard
+//!   library hash (currently SipHash-1-3 via `DefaultHasher`) of the cache
+//!   key.  Survives process restarts and lets a CLI tool warm the cache
+//!   from a manifest before the application launches.  Stored blobs are
+//!   raw RGBA8 base levels (albedo + normal + ORM) — mipmaps are
+//!   regenerated on upload by [`map_to_images`] / [`map_to_images_card`].
 //!
-//! Cache invalidation is the user's responsibility: bump the
-//! [`TextureCache::manifest_version`] when generator output changes (new
-//! noise weights, fixed bugs, …) and stale entries become unreachable.
+//! Cache invalidation is driven by [`TextureConfig::fingerprint`]: any change
+//! to a config field rolls the fingerprint and therefore the
+//! [`TextureCacheKey`], so previously-cached entries become unreachable
+//! automatically.  When generator *internals* change (new noise weights, bug
+//! fixes, etc.) without a config-field change, callers should rotate the
+//! cache directory or bump [`TextureCache::manifest_version`] and act on it
+//! externally — the field is stored on the resource for application use but
+//! is not currently mixed into on-disk filenames.
+//!
+//! [`TextureConfig::fingerprint`]: crate::material::TextureConfig::fingerprint
 //!
 //! [`build_procedural_material_async`]: crate::material::build_procedural_material_async
 //! [`GeneratedHandles`]: crate::generator::GeneratedHandles
@@ -57,7 +66,9 @@ pub struct TextureCacheKey {
     pub kind: &'static str,
     /// `TextureConfig::fingerprint()` — opaque u64.
     pub fingerprint: u64,
+    /// Texture width in texels.
     pub width: u32,
+    /// Texture height in texels.
     pub height: u32,
 }
 
@@ -81,9 +92,8 @@ pub trait TextureCacheStore: Send + Sync {
     /// Stores `handles` under `key`, evicting older entries if needed.
     ///
     /// `is_card` lets disk-backed implementations record the upload mode so
-    /// the next cold start can choose between
-    /// [`map_to_images`](crate::generator::map_to_images) and
-    /// [`map_to_images_card`](crate::generator::map_to_images_card).
+    /// the next cold start can choose between [`map_to_images`] and
+    /// [`map_to_images_card`].
     fn put(
         &mut self,
         key: TextureCacheKey,
@@ -115,11 +125,15 @@ pub trait TextureCacheStore: Send + Sync {
 /// ```rust,ignore
 /// app.insert_resource(TextureCache::memory(DEFAULT_MEMORY_CACHE_ENTRIES));
 /// ```
-///
-/// `manifest_version` is mixed into the on-disk filename of [`FileStore`]
-/// blobs so bumping it invalidates every prior entry without manual cleanup.
 #[derive(Resource)]
 pub struct TextureCache {
+    /// Application-supplied schema version for the cached blobs.
+    ///
+    /// Not currently consumed by the built-in stores — entries are keyed on
+    /// [`TextureCacheKey`] alone — but exposed so callers can rotate caches
+    /// out-of-band when generator internals change without a config-field
+    /// change (e.g. delete the cache directory when `manifest_version` differs
+    /// from the value baked into a previous build).
     pub manifest_version: u32,
     inner: Mutex<Box<dyn TextureCacheStore>>,
 }
@@ -141,9 +155,13 @@ impl TextureCache {
     /// Convenience: file-backed cache rooted at `dir`.
     ///
     /// The directory is created if missing.  Each entry produces one
-    /// `<hash>-<manifest_version>.bin` file containing the three RGBA8
-    /// pixel buffers concatenated; `images: &mut Assets<Image>` is required
-    /// at lookup time to upload the blobs into Bevy's asset system.
+    /// `<sip-hash-of-key>.bin` file containing a short header (see
+    /// [`FileStore`]) followed by the three RGBA8 pixel buffers concatenated.
+    /// `images: &mut Assets<Image>` is required at lookup time to upload the
+    /// blobs into Bevy's asset system.
+    ///
+    /// `manifest_version` is recorded on the resource for application use; the
+    /// built-in [`FileStore`] does not currently mix it into the on-disk key.
     pub fn file(dir: impl Into<PathBuf>, manifest_version: u32) -> std::io::Result<Self> {
         Ok(Self::new(
             Box::new(FileStore::new(dir.into())?),
@@ -172,11 +190,12 @@ impl TextureCache {
     }
 }
 
-/// In-memory LRU-style cache with bounded capacity.
+/// In-memory cache with bounded capacity and FIFO eviction.
 ///
 /// Eviction is FIFO on insertion order — simpler than full LRU and adequate
-/// for the access pattern (palettes loaded in bulk, hits clustered around
-/// hot configs).  When the cap is reached the oldest entry is dropped.
+/// for the typical access pattern (palettes loaded in bulk, hits clustered
+/// around hot configs).  When the cap is reached the oldest entry is
+/// dropped; re-inserting an existing key updates in place without evicting.
 pub struct MemoryStore {
     max_entries: usize,
     entries: HashMap<TextureCacheKey, Arc<GeneratedHandles>>,
@@ -184,6 +203,8 @@ pub struct MemoryStore {
 }
 
 impl MemoryStore {
+    /// Build a memory store bounded by `max_entries`.  Values below `1` are
+    /// rounded up — a zero-sized cache is never useful.
     pub fn new(max_entries: usize) -> Self {
         let cap = max_entries.max(1);
         Self {
@@ -250,15 +271,22 @@ const FILE_FORMAT_VERSION: u32 = 1;
 
 /// Disk-backed cache.  Each entry is a single binary blob in `dir`.
 ///
-/// The on-disk filename is `<sip-hash-13(key)>.bin`.  Entries created with a
-/// different `manifest_version` are still readable but won't be selected by
-/// [`TextureCache::file`] (which mixes the version into the cache key
-/// indirectly via the consumer's choice of [`TextureCacheKey::fingerprint`]).
+/// The on-disk filename is `<DefaultHasher(key)>.bin` (Rust's
+/// `std::hash::DefaultHasher`, currently SipHash-1-3, applied to the entire
+/// [`TextureCacheKey`]).  Entries from older versions of this crate may be
+/// unreadable when the on-disk format version (`FILE_FORMAT_VERSION` in the
+/// blob header) changes; the loader skips entries that fail magic / version
+/// checks, so stale files are inert rather than fatal.
 pub struct FileStore {
     root: PathBuf,
 }
 
 impl FileStore {
+    /// Open or create a file-backed store rooted at `root`.
+    ///
+    /// The directory is created if it does not exist; any I/O error is
+    /// returned unchanged so callers can decide whether to fall back to an
+    /// in-memory store or abort startup.
     pub fn new(root: PathBuf) -> std::io::Result<Self> {
         fs::create_dir_all(&root)?;
         Ok(Self { root })

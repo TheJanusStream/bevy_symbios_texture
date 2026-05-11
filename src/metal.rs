@@ -31,6 +31,8 @@ pub enum MetalStyle {
 /// Configures the appearance of a [`MetalGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MetalConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Surface finish style.
     pub style: MetalStyle,

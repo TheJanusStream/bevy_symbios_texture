@@ -28,6 +28,8 @@ use crate::{
 /// Configures the appearance of a [`CorrugatedGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CorrugatedConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of corrugation ridges across the texture U-axis. \[3, 20\]
     pub ridges: f64,

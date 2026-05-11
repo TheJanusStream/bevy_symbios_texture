@@ -22,6 +22,8 @@ use crate::{
 /// Configures the appearance of an [`IronGrilleGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct IronGrilleConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of vertical bars \[2, 10\].
     pub bars_x: usize,

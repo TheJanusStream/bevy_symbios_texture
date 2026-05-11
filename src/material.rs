@@ -62,8 +62,14 @@ use crate::window::WindowConfig;
 /// rendering with back-face culling and repeat sampling.
 #[derive(Copy, Clone, Debug)]
 pub struct RenderProperties {
+    /// `StandardMaterial::alpha_mode` to apply — `Opaque` for surfaces,
+    /// `Mask(0.5)` for alpha-masked cards.
     pub alpha_mode: AlphaMode,
+    /// `StandardMaterial::double_sided` flag — `true` for cards so a flat
+    /// quad is visible from both sides.
     pub double_sided: bool,
+    /// `StandardMaterial::cull_mode` — `Some(Face::Back)` for surfaces,
+    /// `None` for cards (no culling, so both sides render).
     pub cull_mode: Option<Face>,
     /// `true` when generated images should be uploaded with
     /// [`map_to_images_card`] (clamp-to-edge); `false` for tiling surfaces.

@@ -26,6 +26,8 @@ use crate::{
 /// Configures the appearance of an [`AsphaltGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AsphaltConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Base noise scale \[2, 12\].
     pub scale: f64,

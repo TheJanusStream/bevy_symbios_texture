@@ -40,6 +40,8 @@ pub enum EncausticPattern {
 /// Configures the appearance of an [`EncausticGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct EncausticConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Tile cells across the texture (both axes) \[2, 10\].
     pub scale: f64,

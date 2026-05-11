@@ -15,6 +15,8 @@ use crate::{
 /// Configures the appearance of a [`StuccoGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct StuccoConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Spatial frequency — controls bump density (higher = finer texture).
     pub scale: f64,

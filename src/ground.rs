@@ -15,6 +15,8 @@ use crate::{
 /// Configures the appearance of a [`GroundGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GroundConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Scale of the large soil-patch layer.
     pub macro_scale: f64,

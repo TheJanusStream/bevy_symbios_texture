@@ -49,6 +49,8 @@ const VENULE_FREQ: f64 = 28.0;
 /// Configures the appearance of a [`LeafGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LeafConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Overall colour of the leaf interior in linear RGB \[0, 1\].
     pub color_base: [f32; 3],

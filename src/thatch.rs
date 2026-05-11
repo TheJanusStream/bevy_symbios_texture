@@ -30,6 +30,8 @@ use crate::{
 /// overlap shadow pattern.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ThatchConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Fibre density — noise frequency along U (controls how many fibres are
     /// visible across the tile) \[4, 24\].

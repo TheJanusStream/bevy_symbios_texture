@@ -21,6 +21,8 @@ use crate::{
 /// Configures the appearance of a [`CobblestoneGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CobblestoneConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Approximate number of stones across the tile \[3, 12\].
     pub scale: f64,

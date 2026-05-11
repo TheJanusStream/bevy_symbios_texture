@@ -13,9 +13,21 @@ use bevy::{
 #[derive(Debug)]
 pub enum TextureError {
     /// Either `width` or `height` was zero, which is not a valid wgpu texture size.
-    ZeroDimension { width: u32, height: u32 },
+    ZeroDimension {
+        /// Requested width (texels) — at least one of `width`/`height` is zero.
+        width: u32,
+        /// Requested height (texels) — at least one of `width`/`height` is zero.
+        height: u32,
+    },
     /// One or both dimensions exceeded [`MAX_DIMENSION`].
-    DimensionTooLarge { width: u32, height: u32, max: u32 },
+    DimensionTooLarge {
+        /// Requested width (texels).
+        width: u32,
+        /// Requested height (texels).
+        height: u32,
+        /// The hard cap; equal to [`MAX_DIMENSION`] at the time the error was raised.
+        max: u32,
+    },
 }
 
 impl std::fmt::Display for TextureError {

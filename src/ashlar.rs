@@ -26,6 +26,8 @@ use crate::{
 /// hand-dressed appearance of castle or cathedral walls.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct AshlarConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Number of stone courses (rows) across the tile \[2, 8\].
     pub rows: usize,

@@ -27,6 +27,8 @@ pub enum PaversLayout {
 /// Configures the appearance of a [`PaversGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct PaversConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Grid density — roughly the number of pavers across the tile.
     pub scale: f64,

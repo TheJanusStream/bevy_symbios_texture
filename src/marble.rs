@@ -29,6 +29,8 @@ use crate::{
 /// Configures the appearance of a [`MarbleGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MarbleConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Overall pattern scale. \[1, 8\]
     pub scale: f64,

@@ -28,6 +28,9 @@ pub struct ToroidalNoise<N> {
 }
 
 impl<N: NoiseFn<f64, 4>> ToroidalNoise<N> {
+    /// Wrap a 4-D noise function with a toroidal mapping at the given
+    /// `frequency` (torus radius in noise space; larger → more detail per
+    /// tile).
     pub fn new(noise: N, frequency: f64) -> Self {
         Self { noise, frequency }
     }

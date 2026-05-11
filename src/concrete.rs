@@ -19,6 +19,8 @@ use crate::{
 /// Configures the appearance of a [`ConcreteGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConcreteConfig {
+    /// PRNG seed for the deterministic noise pattern; different seeds give
+    /// statistically-different textures from otherwise-identical configs.
     pub seed: u32,
     /// Scale of the main surface FBM.
     pub scale: f64,
