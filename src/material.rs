@@ -24,6 +24,7 @@ use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::{Commands, Query, ResMut};
 use bevy::image::Image;
+use bevy::math::{Affine2, Vec2};
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::{AlphaMode, Color, Handle};
 use bevy::render::render_resource::Face;
@@ -301,7 +302,9 @@ pub struct PatchMaterialTextures {
 ///
 /// If a [`TextureCache`] resource is provided, the cache is consulted
 /// before dispatching.  On cache hit the texture handles are written
-/// synchronously and no background task is spawned.
+/// synchronously and no background task is spawned.  Disk-backed stores
+/// ([`FileStore`](crate::cache::FileStore)) upload their persisted pixels
+/// into `images` during that lookup, so hits survive process restarts.
 ///
 /// Returns `Handle<StandardMaterial>`.
 pub fn build_procedural_material_async(
@@ -325,6 +328,7 @@ pub fn build_procedural_material_async(
         alpha_mode: props.alpha_mode,
         double_sided: props.double_sided,
         cull_mode: props.cull_mode,
+        uv_transform: Affine2::from_scale(Vec2::splat(settings.uv_scale)),
         ..Default::default()
     };
 
@@ -340,8 +344,11 @@ pub fn build_procedural_material_async(
     };
 
     // Cache hit: write handles into the material before we hand it to Bevy.
+    // Full lookup — disk-backed stores read their blob and upload it into
+    // `images` here, so a FileStore hit short-circuits generation exactly
+    // like a memory hit.
     if let (Some(key), Some(cache_ref)) = (cache_key.as_ref(), cache.as_deref())
-        && let Some(handles) = cache_ref.get_handles(key)
+        && let Some(handles) = cache_ref.get(key, images)
     {
         material.base_color_texture = Some(handles.albedo.clone());
         material.normal_map_texture = Some(handles.normal.clone());
@@ -361,10 +368,6 @@ pub fn build_procedural_material_async(
             },
         ));
     }
-
-    // Touch `images` to keep its &mut binding live across the cache lookup
-    // — the polling system below is the only consumer that mutates it.
-    let _ = images;
 
     handle
 }
@@ -398,6 +401,15 @@ pub fn patch_procedural_material_textures(
         match poll {
             Ok(Ok(map)) => {
                 let is_card = pending.is_card();
+
+                // Persist raw pixels for disk-backed stores while the map is
+                // still available — the upload below consumes it.
+                if let Some(cache_ref) = cache.as_deref()
+                    && let Some(key) = patch.cache_key.as_ref()
+                {
+                    cache_ref.persist_pixels(key, &map, is_card);
+                }
+
                 let handles = if is_card {
                     map_to_images_card(map, &mut images)
                 } else {
@@ -491,5 +503,153 @@ mod tests {
                 .spawn(8, 8)
                 .is_some()
         );
+    }
+
+    use bevy::ecs::system::SystemState;
+    use bevy::ecs::world::World;
+
+    /// Minimal world with the asset containers the builder needs.
+    fn asset_world() -> World {
+        let mut world = World::new();
+        world.insert_resource(Assets::<StandardMaterial>::default());
+        world.insert_resource(Assets::<Image>::default());
+        world
+    }
+
+    /// The system params `build_procedural_material_async` consumes.
+    type BuilderParams = (
+        Commands<'static, 'static>,
+        ResMut<'static, Assets<StandardMaterial>>,
+        ResMut<'static, Assets<Image>>,
+    );
+
+    /// `uv_scale` lands on `StandardMaterial::uv_transform`; the default of
+    /// `1.0` produces the identity transform.
+    #[test]
+    fn uv_scale_is_applied_to_uv_transform() {
+        let mut world = asset_world();
+        let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
+        let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+
+        let scaled = MaterialSettings {
+            uv_scale: 2.0,
+            ..MaterialSettings::default()
+        };
+        let handle = build_procedural_material_async(
+            &mut commands,
+            &mut materials,
+            &mut images,
+            None,
+            &scaled,
+            8,
+            8,
+        );
+        let mat = materials.get(&handle).expect("material registered");
+        assert_eq!(mat.uv_transform, Affine2::from_scale(Vec2::splat(2.0)));
+
+        let default = MaterialSettings::default();
+        let handle = build_procedural_material_async(
+            &mut commands,
+            &mut materials,
+            &mut images,
+            None,
+            &default,
+            8,
+            8,
+        );
+        let mat = materials.get(&handle).expect("material registered");
+        assert_eq!(mat.uv_transform, Affine2::IDENTITY);
+
+        state.apply(&mut world);
+    }
+
+    /// End-to-end FileStore regression test through the real plugin systems:
+    /// pass 1 generates and persists to disk; pass 2 (fresh world, same
+    /// directory) must hit the blob synchronously and dispatch no task.
+    #[test]
+    fn file_cache_round_trips_through_material_flow() {
+        let dir = std::env::temp_dir().join(format!("bst-matflow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let settings = MaterialSettings {
+            texture: TextureConfig::Bark(BarkConfig::default()),
+            ..MaterialSettings::default()
+        };
+
+        // Pass 1: cold cache — generate through the patch system.
+        {
+            let mut world = asset_world();
+            world.insert_resource(TextureCache::file(dir.clone(), 0).expect("create cache dir"));
+
+            let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
+            let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+            let handle = build_procedural_material_async(
+                &mut commands,
+                &mut materials,
+                &mut images,
+                None,
+                &settings,
+                8,
+                8,
+            );
+            state.apply(&mut world);
+
+            let mut schedule = bevy::ecs::schedule::Schedule::default();
+            schedule.add_systems(patch_procedural_material_textures);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                schedule.run(&mut world);
+                let patched = world
+                    .resource::<Assets<StandardMaterial>>()
+                    .get(&handle)
+                    .is_some_and(|m| m.base_color_texture.is_some());
+                if patched {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "texture generation timed out"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+        }
+
+        let blobs = std::fs::read_dir(&dir).expect("cache dir readable").count();
+        assert_eq!(blobs, 1, "FileStore must have persisted exactly one blob");
+
+        // Pass 2: fresh world, same directory — synchronous disk hit.
+        {
+            let mut world = asset_world();
+            let mut cache = TextureCache::file(dir.clone(), 0).expect("reopen cache dir");
+
+            let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
+            let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+            let handle = build_procedural_material_async(
+                &mut commands,
+                &mut materials,
+                &mut images,
+                Some(&mut cache),
+                &settings,
+                8,
+                8,
+            );
+            let mat = materials.get(&handle).expect("material registered");
+            assert!(
+                mat.base_color_texture.is_some(),
+                "disk hit must populate the albedo slot synchronously"
+            );
+            assert!(mat.normal_map_texture.is_some());
+            assert!(mat.metallic_roughness_texture.is_some());
+            state.apply(&mut world);
+
+            let mut pending = world.query::<&PendingTexture>();
+            assert_eq!(
+                pending.iter(&world).count(),
+                0,
+                "a cache hit must not dispatch a generation task"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

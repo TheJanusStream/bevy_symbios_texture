@@ -168,7 +168,10 @@ does not currently mix it into the on-disk filename.
 
 The library ships two built-in stores — `MemoryStore` (bounded, FIFO
 eviction, default) and `FileStore` (binary blobs on disk) — and exposes the
-`TextureCacheStore` trait for custom backends.
+`TextureCacheStore` trait for custom backends.  `FileStore` persists the raw
+pixel blobs as generation completes and re-uploads them (regenerating
+mipmaps) on the first hit after a restart, so warm caches survive across
+processes.
 
 ### Animated parameter curves
 

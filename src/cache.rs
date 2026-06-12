@@ -102,6 +102,22 @@ pub trait TextureCacheStore: Send + Sync {
         map: Option<&TextureMap>,
     );
 
+    /// Persist the raw pixel buffers for `key` while they are still
+    /// available — i.e. **before** the upload consumes the [`TextureMap`].
+    ///
+    /// [`patch_procedural_material_textures`] calls this on the cache-miss
+    /// path with the freshly generated map, then registers the uploaded
+    /// handles via [`put`](TextureCacheStore::put) (with `map = None`)
+    /// immediately afterwards.  Disk-backed implementations ([`FileStore`])
+    /// write their blob here; memory-only backends keep the default no-op.
+    ///
+    /// [`patch_procedural_material_textures`]: crate::material::patch_procedural_material_textures
+    fn put_pixels(&mut self, _key: &TextureCacheKey, _map: &TextureMap, _is_card: bool) {
+        // Default: memory-only backends serve handles straight from RAM and
+        // have no pixel persistence — the subsequent `put` carries the data
+        // they need.  Only disk-backed stores override this.
+    }
+
     /// Optional fast path used by
     /// [`TextureCache::get_handles`] when no `Assets<Image>` is on hand.
     ///
@@ -169,16 +185,37 @@ impl TextureCache {
         ))
     }
 
+    /// Full cache lookup.  Backends that load lazily ([`FileStore`]) read
+    /// their blob and upload it into `images` here, so a hit returns handles
+    /// ready to assign to `StandardMaterial` slots.
+    ///
+    /// [`build_procedural_material_async`](crate::material::build_procedural_material_async)
+    /// uses this, which is what makes disk-backed caches short-circuit
+    /// generation exactly like memory-backed ones.
+    pub fn get(
+        &self,
+        key: &TextureCacheKey,
+        images: &mut Assets<Image>,
+    ) -> Option<Arc<GeneratedHandles>> {
+        self.inner.lock().ok()?.get(key, images)
+    }
+
     /// Look up a key without touching `Assets<Image>`.
     ///
-    /// Used by the synchronous fast path in
-    /// [`build_procedural_material_async`](crate::material::build_procedural_material_async),
-    /// where the helper has only the materials store on hand and the polling
-    /// system later patches the textures in.  Returns `None` for backends
-    /// that need image upload to materialise handles ([`FileStore`] is one
-    /// such: a separate full lookup happens in the polling system).
+    /// Only backends that can materialise handles from RAM ([`MemoryStore`])
+    /// return hits here; disk-backed stores need an image upload and return
+    /// `None`.  Prefer [`get`](TextureCache::get) whenever an
+    /// `Assets<Image>` is on hand.
     pub fn get_handles(&self, key: &TextureCacheKey) -> Option<Arc<GeneratedHandles>> {
         self.inner.lock().ok()?.peek_memory_only(key)
+    }
+
+    /// Persist raw pixels for `key` ahead of the upload that consumes them.
+    /// No-op for memory-only backends; see [`TextureCacheStore::put_pixels`].
+    pub fn persist_pixels(&self, key: &TextureCacheKey, map: &TextureMap, is_card: bool) {
+        if let Ok(mut store) = self.inner.lock() {
+            store.put_pixels(key, map, is_card);
+        }
     }
 
     /// Insert handles for `key`.  Mirrors `TextureCacheStore::put` without
@@ -298,6 +335,30 @@ impl FileStore {
         key.hash(&mut h);
         self.root.join(format!("{:016x}.bin", h.finish()))
     }
+
+    /// Serialise `map` into the blob file for `key` (see the layout above).
+    /// I/O failures are logged and swallowed — a broken cache write must not
+    /// fail texture generation.
+    fn write_blob(&self, key: &TextureCacheKey, map: &TextureMap, is_card: bool) {
+        let path = self.path_for(key);
+        if let Err(e) = (|| -> std::io::Result<()> {
+            let mut file = fs::File::create(&path)?;
+            file.write_all(FILE_MAGIC)?;
+            file.write_all(&FILE_FORMAT_VERSION.to_le_bytes())?;
+            file.write_all(&[is_card as u8])?;
+            file.write_all(&map.width.to_le_bytes())?;
+            file.write_all(&map.height.to_le_bytes())?;
+            file.write_all(&(map.albedo.len() as u32).to_le_bytes())?;
+            file.write_all(&(map.normal.len() as u32).to_le_bytes())?;
+            file.write_all(&(map.roughness.len() as u32).to_le_bytes())?;
+            file.write_all(&map.albedo)?;
+            file.write_all(&map.normal)?;
+            file.write_all(&map.roughness)?;
+            Ok(())
+        })() {
+            bevy::log::warn!("FileStore write failed for {}: {e}", path.display());
+        }
+    }
 }
 
 impl TextureCacheStore for FileStore {
@@ -354,29 +415,17 @@ impl TextureCacheStore for FileStore {
         map: Option<&TextureMap>,
     ) {
         let Some(map) = map else {
-            // No raw pixels to persist — likely an in-process insertion from
-            // a memory-only path.  Skipping is correct: we'll re-cache when
-            // the next generation pass produces a fresh `TextureMap`.
+            // No raw pixels to persist.  The plugin flow persists via
+            // `put_pixels` *before* the upload consumes the map, so a
+            // handles-only `put` (e.g. `TextureCache::insert`) has nothing
+            // left to write — handles cannot be serialised to disk.
             return;
         };
-        let path = self.path_for(&key);
-        if let Err(e) = (|| -> std::io::Result<()> {
-            let mut file = fs::File::create(&path)?;
-            file.write_all(FILE_MAGIC)?;
-            file.write_all(&FILE_FORMAT_VERSION.to_le_bytes())?;
-            file.write_all(&[is_card as u8])?;
-            file.write_all(&map.width.to_le_bytes())?;
-            file.write_all(&map.height.to_le_bytes())?;
-            file.write_all(&(map.albedo.len() as u32).to_le_bytes())?;
-            file.write_all(&(map.normal.len() as u32).to_le_bytes())?;
-            file.write_all(&(map.roughness.len() as u32).to_le_bytes())?;
-            file.write_all(&map.albedo)?;
-            file.write_all(&map.normal)?;
-            file.write_all(&map.roughness)?;
-            Ok(())
-        })() {
-            bevy::log::warn!("FileStore::put failed for {}: {e}", path.display());
-        }
+        self.write_blob(&key, map, is_card);
+    }
+
+    fn put_pixels(&mut self, key: &TextureCacheKey, map: &TextureMap, is_card: bool) {
+        self.write_blob(key, map, is_card);
     }
 }
 
@@ -431,5 +480,70 @@ mod tests {
         store.put(key("Bark", 1), dummy_handles(), false, None);
         assert!(store.peek_memory_only(&key("Bark", 1)).is_some());
         assert!(store.peek_memory_only(&key("Bark", 2)).is_some());
+    }
+
+    fn tiny_map(w: u32, h: u32) -> TextureMap {
+        let n = (w * h * 4) as usize;
+        TextureMap {
+            albedo: vec![10u8; n],
+            normal: vec![128u8; n],
+            roughness: vec![200u8; n],
+            width: w,
+            height: h,
+        }
+    }
+
+    /// Unique per-test scratch directory under the system temp dir.
+    fn scratch_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("bst-cache-{}-{tag}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn file_store_round_trips_pixels_via_put_pixels() {
+        let dir = scratch_dir("roundtrip");
+        let mut store = FileStore::new(dir.clone()).expect("create store dir");
+        let mut images = Assets::<Image>::default();
+
+        let k = key("Bark", 7);
+        assert!(store.get(&k, &mut images).is_none(), "cold store must miss");
+
+        store.put_pixels(&k, &tiny_map(4, 4), false);
+        let handles = store.get(&k, &mut images).expect("hit after put_pixels");
+        let img = images.get(&handles.albedo).expect("albedo uploaded");
+        assert_eq!(img.texture_descriptor.size.width, 4);
+        assert_eq!(img.texture_descriptor.size.height, 4);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_store_preserves_card_mode_across_restart() {
+        use bevy::image::{ImageAddressMode, ImageSampler};
+
+        let dir = scratch_dir("cardmode");
+        let k = key("Leaf", 9);
+        {
+            let mut store = FileStore::new(dir.clone()).expect("create store dir");
+            store.put_pixels(&k, &tiny_map(2, 2), true);
+        }
+        // Fresh store over the same directory — simulates a process restart.
+        let mut store = FileStore::new(dir.clone()).expect("reopen store dir");
+        let mut images = Assets::<Image>::default();
+        let handles = store.get(&k, &mut images).expect("hit after restart");
+        let img = images.get(&handles.albedo).expect("albedo uploaded");
+        match &img.sampler {
+            ImageSampler::Descriptor(d) => {
+                assert_eq!(
+                    d.address_mode_u,
+                    ImageAddressMode::ClampToEdge,
+                    "is_card=true must restore a clamp-to-edge sampler"
+                );
+            }
+            _ => panic!("expected a descriptor sampler"),
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
