@@ -10,9 +10,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface},
 };
 
 /// Configures the appearance of a [`BrickGenerator`].
@@ -96,116 +96,126 @@ impl BrickGenerator {
     }
 }
 
-impl TextureGenerator for BrickGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: pitting grid + derived bond-layout constants.
+struct BrickCell<'a> {
+    config: &'a BrickConfig,
+    rough_grid: &'a [f64],
+    /// Bevel radius in cell-fraction space.
+    bevel_r: f64,
+    /// Inner half-extents for the rounded-box SDF.
+    hx: f64,
+    hy: f64,
+    /// Integer row / column counts so the grid tiles exactly.
+    scale: f64,
+    cols: f64,
+    width: usize,
+}
+
+impl SurfaceCell for BrickCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+
+        let v_scaled = v * self.scale;
+        let row_id = v_scaled.floor();
+        let v_frac = v_scaled.fract();
+
+        let u_shifted = u * self.cols + row_id * c.row_offset;
+        let brick_id_u = u_shifted.floor() as i64;
+        let brick_id_v = row_id as i64;
+        let u_frac = u_shifted.fract();
+
+        // Cell-centered coordinates in [-0.5, 0.5].
+        let cx = u_frac - 0.5;
+        let cy = v_frac - 0.5;
+
+        // Rounded-box SDF: negative inside brick, positive in mortar.
+        let dx = cx.abs() - self.hx;
+        let dy = cy.abs() - self.hy;
+        let sdf =
+            (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0) - self.bevel_r;
+
+        let raw_surf = normalize(self.rough_grid[y as usize * self.width + x as usize]);
+
+        let (h_val, color) = if sdf < 0.0 {
+            // Inside brick: bevel ramp + surface roughness.
+            let edge_t = ((-sdf) / (self.bevel_r + 0.01)).clamp(0.0, 1.0);
+            let noise_bump = (raw_surf - 0.5) * c.roughness * 0.4;
+            let h_val = (edge_t + noise_bump * edge_t).clamp(0.0, 1.0);
+
+            // Per-brick colour variance via integer cell hash.
+            let cv = cell_hash(brick_id_u, brick_id_v, c.seed);
+            let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
+            let color = [
+                (c.color_brick[0] + jitter as f32).clamp(0.0, 1.0),
+                (c.color_brick[1] + jitter as f32 * 0.7).clamp(0.0, 1.0),
+                (c.color_brick[2] + jitter as f32 * 0.5).clamp(0.0, 1.0),
+            ];
+            (h_val, color)
+        } else {
+            // Mortar gap: subtle texture.
+            (raw_surf * c.roughness * 0.04, c.color_mortar)
+        };
+
+        // ORM: roughness higher in mortar, lower on smooth brick.
+        let rough_val = if sdf < 0.0 {
+            0.45 + raw_surf as f32 * 0.3
+        } else {
+            0.90
+        };
+
+        SurfaceSample::matte(h_val, color, rough_val)
+    }
+}
+
+impl BrickGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Toroidal surface-roughness FBM for pitting detail.
-        let rough_grid = sample_grid(&self.rough_noise, width, height);
-
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let mut rough_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.rough_noise, width, height, &mut rough_grid);
 
         // Bevel radius in cell-fraction space.
         let bevel_r = (c.bevel * c.mortar_size * 0.5).max(0.0);
-        // Inner half-extents for the rounded-box SDF.
-        let hx = (0.5 - c.mortar_size - bevel_r).max(0.0);
-        let hy = (0.5 - c.mortar_size - bevel_r).max(0.0);
-
         // Both row count and column count must be integers for the grid to tile.
         let scale = c.scale.round();
-        let cols = (scale * c.aspect_ratio).round();
+        let cell = BrickCell {
+            config: c,
+            rough_grid: &rough_grid,
+            bevel_r,
+            hx: (0.5 - c.mortar_size - bevel_r).max(0.0),
+            hy: (0.5 - c.mortar_size - bevel_r).max(0.0),
+            scale,
+            cols: (scale * c.aspect_ratio).round(),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-            let v_scaled = v * scale;
-            let row_id = v_scaled.floor();
-            let v_frac = v_scaled.fract();
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let u_shifted = u * cols + row_id * c.row_offset;
-                let brick_id_u = u_shifted.floor() as i64;
-                let brick_id_v = row_id as i64;
-                let u_frac = u_shifted.fract();
-
-                // Cell-centered coordinates in [-0.5, 0.5].
-                let cx = u_frac - 0.5;
-                let cy = v_frac - 0.5;
-
-                // Rounded-box SDF: negative inside brick, positive in mortar.
-                let dx = cx.abs() - hx;
-                let dy = cy.abs() - hy;
-                let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0)
-                    - bevel_r;
-
-                let raw_surf = normalize(rough_grid[y * w + x]);
-                let h_val;
-                let (r, gr, b);
-
-                if sdf < 0.0 {
-                    // Inside brick: bevel ramp + surface roughness.
-                    let edge_t = ((-sdf) / (bevel_r + 0.01)).clamp(0.0, 1.0);
-                    let noise_bump = (raw_surf - 0.5) * c.roughness * 0.4;
-                    h_val = (edge_t + noise_bump * edge_t).clamp(0.0, 1.0);
-
-                    // Per-brick colour variance via integer cell hash.
-                    let cv = cell_hash(brick_id_u, brick_id_v, c.seed);
-                    let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
-                    r = (c.color_brick[0] + jitter as f32).clamp(0.0, 1.0);
-                    gr = (c.color_brick[1] + jitter as f32 * 0.7).clamp(0.0, 1.0);
-                    b = (c.color_brick[2] + jitter as f32 * 0.5).clamp(0.0, 1.0);
-                } else {
-                    // Mortar gap: subtle texture.
-                    h_val = raw_surf * c.roughness * 0.04;
-                    r = c.color_mortar[0];
-                    gr = c.color_mortar[1];
-                    b = c.color_mortar[2];
-                }
-
-                let idx = y * w + x;
-                heights[idx] = h_val;
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(gr);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: roughness higher in mortar, lower on smooth brick.
-                let rough_val = if sdf < 0.0 {
-                    0.45 + raw_surf as f32 * 0.3
-                } else {
-                    0.90
-                };
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(rough_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for BrickGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 
@@ -221,9 +231,4 @@ fn cell_hash(bx: i64, by: i64, seed: u32) -> f64 {
     h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
     h ^= h >> 33;
     (h as f64) * (1.0 / u64::MAX as f64)
-}
-
-#[inline]
-fn normalize(v: f64) -> f64 {
-    v * 0.5 + 0.5
 }

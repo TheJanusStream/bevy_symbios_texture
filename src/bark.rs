@@ -22,8 +22,9 @@ use crate::{
     generator::{
         TextureError, TextureGenerator, TextureMap, Workspace, linear_to_srgb, validate_dimensions,
     },
-    noise::{ToroidalNoise, sample_grid_into},
+    noise::{ToroidalNoise, bilinear_sample_torus, normalize, sample_grid_into},
     normal::{BoundaryMode, height_to_normal},
+    surface::lerp,
 };
 
 /// Configures the appearance of a [`BarkGenerator`].
@@ -275,48 +276,4 @@ impl TextureGenerator for BarkGenerator {
     ) -> Result<TextureMap, TextureError> {
         self.generate_inner(width, height, Some(workspace))
     }
-}
-
-// --- helpers ----------------------------------------------------------------
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
-}
-
-/// Map a raw noise sample from `[-1, 1]` to `[0, 1]`.
-#[inline]
-fn normalize(v: f64) -> f64 {
-    v * 0.5 + 0.5
-}
-
-/// Bilinearly interpolate a value from a toroidal (seamlessly tiling) grid.
-///
-/// `u` and `v` are in UV space and may fall outside `[0, 1]`; they are wrapped
-/// before sampling so the lookup is always valid.  This is used to fetch the
-/// domain-warped base noise value without additional `sin`/`cos` calls.
-#[inline]
-fn bilinear_sample_torus(grid: &[f64], w: usize, h: usize, u: f64, v: f64) -> f64 {
-    // Wrap UV into [0, 1).
-    let u = u.rem_euclid(1.0);
-    let v = v.rem_euclid(1.0);
-
-    // Convert to fractional pixel coordinates.
-    let px = u * w as f64;
-    let py = v * h as f64;
-
-    let x0 = px as usize % w;
-    let y0 = py as usize % h;
-    let x1 = (x0 + 1) % w;
-    let y1 = (y0 + 1) % h;
-
-    let fx = px.fract();
-    let fy = py.fract();
-
-    let v00 = grid[y0 * w + x0];
-    let v10 = grid[y0 * w + x1];
-    let v01 = grid[y1 * w + x0];
-    let v11 = grid[y1 * w + x1];
-
-    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }

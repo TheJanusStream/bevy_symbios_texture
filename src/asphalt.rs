@@ -18,9 +18,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of an [`AsphaltGenerator`].
@@ -100,109 +100,118 @@ impl AsphaltGenerator {
     }
 }
 
-impl TextureGenerator for AsphaltGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: three precomputed FBM grids + config.
+struct AsphaltCell<'a> {
+    config: &'a AsphaltConfig,
+    macro_grid: &'a [f64],
+    micro_grid: &'a [f64],
+    aggregate_grid: &'a [f64],
+    /// `1 - clamped aggregate_density`; precomputed so the mask threshold
+    /// never goes degenerate.
+    agg_threshold: f64,
+    width: usize,
+}
+
+impl SurfaceCell for AsphaltCell<'_> {
+    fn sample(&self, x: u32, y: u32, _u: f64, _v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.width + x as usize;
+
+        // Normalise all three grids to [0, 1].
+        let macro_v = normalize(self.macro_grid[idx]);
+        let micro_v = normalize(self.micro_grid[idx]);
+        let agg_v = normalize(self.aggregate_grid[idx]);
+
+        // Aggregate fleck: pixels above threshold are exposed stone chips.
+        let is_agg = agg_v > self.agg_threshold;
+
+        // Stain factor: macro noise drives subtle lightening / darkening.
+        // Centred at 0.5 so the mean effect is neutral.
+        let stain = (macro_v - 0.5) * c.stain_level;
+
+        // Height: micro-texture for the binder matrix; aggregate sits proud.
+        let agg_bump = if is_agg { 0.3 } else { 0.0 };
+        let height = (micro_v * 0.7 + agg_bump).clamp(0.0, 1.0);
+
+        // Colour: bright stone flecks or stain-modulated asphalt base.
+        let color = if is_agg {
+            // Aggregate: slight micro-variation on the stone colour.
+            let brightness = lerp(0.85, 1.0, micro_v as f32);
+            [
+                c.color_aggregate[0] * brightness,
+                c.color_aggregate[1] * brightness,
+                c.color_aggregate[2] * brightness,
+            ]
+        } else {
+            // Asphalt binder: stain shifts the base colour slightly.
+            let stain_f = stain as f32;
+            [
+                (c.color_base[0] + stain_f).clamp(0.0, 1.0),
+                (c.color_base[1] + stain_f).clamp(0.0, 1.0),
+                (c.color_base[2] + stain_f).clamp(0.0, 1.0),
+            ]
+        };
+
+        // ORM: asphalt is uniformly rough; micro peaks are fractionally
+        // smoother (exposed surface facets of the aggregate matrix).
+        let rough = (c.roughness - micro_v * 0.1).clamp(0.0, 1.0) as f32;
+
+        SurfaceSample::matte(height, color, rough)
+    }
+}
+
+impl AsphaltGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Macro stain / colour-variation FBM — low frequency for large blotches.
-        let macro_grid = sample_grid(&self.macro_noise, width, height);
+        let mut macro_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.macro_noise, width, height, &mut macro_grid);
 
         // Mid-frequency micro-texture — the fine granular surface of the binder.
-        let micro_grid = sample_grid(&self.micro_noise, width, height);
+        let mut micro_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.micro_noise, width, height, &mut micro_grid);
 
         // High-frequency aggregate fleck noise — sharp, fine-grained.
-        let aggregate_grid = sample_grid(&self.agg_noise, width, height);
+        let mut aggregate_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.agg_noise, width, height, &mut aggregate_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let cell = AsphaltCell {
+            config: c,
+            macro_grid: &macro_grid,
+            micro_grid: &micro_grid,
+            aggregate_grid: &aggregate_grid,
+            agg_threshold: 1.0 - c.aggregate_density.clamp(0.01, 0.99),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        // Precompute the aggregate threshold; clamp density to a valid range so
-        // the threshold stays in (0, 1) and never produces a degenerate mask.
-        let agg_density = c.aggregate_density.clamp(0.01, 0.99);
-        let agg_threshold = 1.0 - agg_density;
-
-        for y in 0..h {
-            for x in 0..w {
-                let idx = y * w + x;
-
-                // Normalise all three grids to [0, 1].
-                let macro_v = normalize(macro_grid[idx]);
-                let micro_v = normalize(micro_grid[idx]);
-                let agg_v = normalize(aggregate_grid[idx]);
-
-                // Aggregate fleck: pixels above threshold are exposed stone chips.
-                let is_agg = agg_v > agg_threshold;
-
-                // Stain factor: macro noise drives subtle lightening / darkening.
-                // Centred at 0.5 so the mean effect is neutral.
-                let stain = (macro_v - 0.5) * c.stain_level;
-
-                // Height: micro-texture for the binder matrix; aggregate sits proud.
-                let agg_bump = if is_agg { 0.3 } else { 0.0 };
-                heights[idx] = (micro_v * 0.7 + agg_bump).clamp(0.0, 1.0);
-
-                // Colour: bright stone flecks or stain-modulated asphalt base.
-                let (r, g, b) = if is_agg {
-                    // Aggregate: slight micro-variation on the stone colour.
-                    let brightness = lerp(0.85, 1.0, micro_v as f32);
-                    (
-                        c.color_aggregate[0] * brightness,
-                        c.color_aggregate[1] * brightness,
-                        c.color_aggregate[2] * brightness,
-                    )
-                } else {
-                    // Asphalt binder: stain shifts the base colour slightly.
-                    let stain_f = stain as f32;
-                    (
-                        (c.color_base[0] + stain_f).clamp(0.0, 1.0),
-                        (c.color_base[1] + stain_f).clamp(0.0, 1.0),
-                        (c.color_base[2] + stain_f).clamp(0.0, 1.0),
-                    )
-                };
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: asphalt is uniformly rough; micro peaks are fractionally
-                // smoother (exposed surface facets of the aggregate matrix).
-                let rough = (c.roughness - micro_v * 0.1).clamp(0.0, 1.0) as f32;
-                roughness_buf[ai] = 255; // Occlusion = 1.0
-                roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0; // Metallic = 0.0
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(macro_grid);
+            ws.return_grid(micro_grid);
+            ws.return_grid(aggregate_grid);
         }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+        result
     }
 }
 
-// --- helpers ----------------------------------------------------------------
+impl TextureGenerator for AsphaltGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

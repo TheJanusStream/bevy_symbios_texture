@@ -10,9 +10,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface},
 };
 
 /// Layout of individual paver stones.
@@ -97,102 +97,109 @@ impl PaversGenerator {
     }
 }
 
-impl TextureGenerator for PaversGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: surface grid + derived SDF layout constants.
+struct PaversCell<'a> {
+    config: &'a PaversConfig,
+    surf_grid: &'a [f64],
+    bevel_r: f64,
+    /// Inner half-extents for the stone SDF (before bevel).
+    hx: f64,
+    hy: f64,
+    /// Integer column / row counts so the grid tiles exactly.
+    cols: f64,
+    rows: f64,
+    width: usize,
+}
+
+impl SurfaceCell for PaversCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.width + x as usize;
+        let raw_surf = normalize(self.surf_grid[idx]);
+
+        let (sdf_val, cell_id_u, cell_id_v) = match c.layout {
+            PaversLayout::Square => {
+                square_cell(u, v, self.cols, self.rows, self.hx, self.hy, self.bevel_r)
+            }
+            PaversLayout::Hexagonal => hex_cell(u, v, c.scale),
+        };
+
+        let (h_val, color) = if sdf_val < 0.0 {
+            // Inside stone.
+            let edge_t = ((-sdf_val) / (self.bevel_r + 0.005)).clamp(0.0, 1.0);
+            let noise_bump = (raw_surf - 0.5) * c.roughness * 0.4;
+            let h_val = (edge_t + noise_bump * edge_t).clamp(0.0, 1.0);
+
+            let cv = cell_hash(cell_id_u, cell_id_v, c.seed);
+            let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
+            let color = [
+                (c.color_stone[0] + jitter as f32).clamp(0.0, 1.0),
+                (c.color_stone[1] + jitter as f32 * 0.8).clamp(0.0, 1.0),
+                (c.color_stone[2] + jitter as f32 * 0.6).clamp(0.0, 1.0),
+            ];
+            (h_val, color)
+        } else {
+            // Grout joint.
+            (raw_surf * c.roughness * 0.04, c.color_grout)
+        };
+
+        let rough_val = if sdf_val < 0.0 {
+            0.70 + raw_surf as f32 * 0.20
+        } else {
+            0.92
+        };
+
+        SurfaceSample::matte(h_val, color, rough_val)
+    }
+}
+
+impl PaversGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Surface micro-detail FBM.
-        let surf_grid = sample_grid(&self.surf_noise, width, height);
-
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let mut surf_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.surf_noise, width, height, &mut surf_grid);
 
         let grout_half = (c.grout_width * 0.5).clamp(0.0, 0.45);
         let bevel_r = (c.bevel * grout_half).max(0.0);
-        // Inner half-extents for the stone SDF (before bevel).
-        let hx = (0.5 - grout_half - bevel_r).max(0.0);
-        let hy = (0.5 - grout_half - bevel_r).max(0.0);
+        let cell = PaversCell {
+            config: c,
+            surf_grid: &surf_grid,
+            bevel_r,
+            hx: (0.5 - grout_half - bevel_r).max(0.0),
+            hy: (0.5 - grout_half - bevel_r).max(0.0),
+            cols: (c.scale * c.aspect_ratio).round(),
+            rows: c.scale.round(),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        // Both column and row counts must be integers for the grid to tile.
-        let cols = (c.scale * c.aspect_ratio).round();
-        let rows = c.scale.round();
-
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let idx = y * w + x;
-                let raw_surf = normalize(surf_grid[idx]);
-
-                let (sdf_val, cell_id_u, cell_id_v) = match c.layout {
-                    PaversLayout::Square => square_cell(u, v, cols, rows, hx, hy, bevel_r),
-                    PaversLayout::Hexagonal => hex_cell(u, v, c.scale),
-                };
-
-                let h_val;
-                let (r, g, b);
-
-                if sdf_val < 0.0 {
-                    // Inside stone.
-                    let edge_t = ((-sdf_val) / (bevel_r + 0.005)).clamp(0.0, 1.0);
-                    let noise_bump = (raw_surf - 0.5) * c.roughness * 0.4;
-                    h_val = (edge_t + noise_bump * edge_t).clamp(0.0, 1.0);
-
-                    let cv = cell_hash(cell_id_u, cell_id_v, c.seed);
-                    let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
-                    r = (c.color_stone[0] + jitter as f32).clamp(0.0, 1.0);
-                    g = (c.color_stone[1] + jitter as f32 * 0.8).clamp(0.0, 1.0);
-                    b = (c.color_stone[2] + jitter as f32 * 0.6).clamp(0.0, 1.0);
-                } else {
-                    // Grout joint.
-                    h_val = raw_surf * c.roughness * 0.04;
-                    r = c.color_grout[0];
-                    g = c.color_grout[1];
-                    b = c.color_grout[2];
-                }
-
-                heights[idx] = h_val;
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                let rough_val = if sdf_val < 0.0 {
-                    0.70 + raw_surf as f32 * 0.20
-                } else {
-                    0.92
-                };
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(surf_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for PaversGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 

@@ -15,11 +15,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{
-        TextureError, TextureGenerator, TextureMap, Workspace, linear_to_srgb, validate_dimensions,
-    },
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
     noise::{ToroidalNoise, normalize, sample_grid_into},
-    normal::{BoundaryMode, height_to_normal},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`ThatchGenerator`].
@@ -136,60 +134,15 @@ impl ThatchGenerator {
         sample_grid_into(&self.fibre_noise, width, height, &mut fibre_grid);
         sample_grid_into(&self.layer_noise, width, height, &mut layer_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
-
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            let layer_count = c.layer_count.round().max(1.0);
-            let layer_v = (v * layer_count).fract();
-            let shadow_t = (1.0 - layer_v).powf(1.5);
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let idx = y * w + x;
-
-                let warp = warp_grid[idx] * c.warp_strength;
-
-                let warped_x = {
-                    let ux = (u + warp).rem_euclid(1.0);
-                    (ux * w as f64) as usize % w
-                };
-                let warped_idx = y * w + warped_x;
-                let fibre_raw = normalize(fibre_grid[warped_idx]);
-                let layer_raw = normalize(layer_grid[idx]);
-
-                let fiber_t = (0.65 * fibre_raw + 0.35 * layer_raw).clamp(0.0, 1.0);
-
-                let h_val = (fiber_t * (0.5 + 0.5 * layer_v) - shadow_t * c.layer_shadow * 0.3)
-                    .clamp(0.0, 1.0);
-                heights[idx] = h_val;
-
-                let brightness = (fiber_t * (1.0 - shadow_t * c.layer_shadow)).clamp(0.0, 1.0);
-                let r = lerp(c.color_shadow[0], c.color_straw[0], brightness as f32);
-                let g = lerp(c.color_shadow[1], c.color_straw[1], brightness as f32);
-                let b = lerp(c.color_shadow[2], c.color_straw[2], brightness as f32);
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                let rough_val =
-                    (0.80 - fiber_t as f32 * 0.15 + shadow_t as f32 * 0.10).clamp(0.65, 0.95);
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
-        }
+        let cell = ThatchCell {
+            config: c,
+            warp_grid: &warp_grid,
+            fibre_grid: &fibre_grid,
+            layer_grid: &layer_grid,
+            layer_count: c.layer_count.round().max(1.0),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
         // Return grid buffers to the workspace for reuse.
         if let Some(ws) = ws {
@@ -197,22 +150,56 @@ impl ThatchGenerator {
             ws.return_grid(fibre_grid);
             ws.return_grid(layer_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+/// Per-generation sampler: warp / fibre / layer grids + config.
+struct ThatchCell<'a> {
+    config: &'a ThatchConfig,
+    warp_grid: &'a [f64],
+    fibre_grid: &'a [f64],
+    layer_grid: &'a [f64],
+    /// `layer_count` rounded and clamped to ≥ 1 so the sawtooth tiles.
+    layer_count: f64,
+    width: usize,
+}
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+impl SurfaceCell for ThatchCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let w = self.width;
+        let idx = y as usize * w + x as usize;
+
+        let layer_v = (v * self.layer_count).fract();
+        let shadow_t = (1.0 - layer_v).powf(1.5);
+
+        let warp = self.warp_grid[idx] * c.warp_strength;
+
+        // Lateral domain warp: shift the fibre lookup along the row.
+        let warped_x = {
+            let ux = (u + warp).rem_euclid(1.0);
+            (ux * w as f64) as usize % w
+        };
+        let warped_idx = y as usize * w + warped_x;
+        let fibre_raw = normalize(self.fibre_grid[warped_idx]);
+        let layer_raw = normalize(self.layer_grid[idx]);
+
+        let fiber_t = (0.65 * fibre_raw + 0.35 * layer_raw).clamp(0.0, 1.0);
+
+        let h_val =
+            (fiber_t * (0.5 + 0.5 * layer_v) - shadow_t * c.layer_shadow * 0.3).clamp(0.0, 1.0);
+
+        let brightness = (fiber_t * (1.0 - shadow_t * c.layer_shadow)).clamp(0.0, 1.0);
+        let color = [
+            lerp(c.color_shadow[0], c.color_straw[0], brightness as f32),
+            lerp(c.color_shadow[1], c.color_straw[1], brightness as f32),
+            lerp(c.color_shadow[2], c.color_straw[2], brightness as f32),
+        ];
+
+        let rough_val = (0.80 - fiber_t as f32 * 0.15 + shadow_t as f32 * 0.10).clamp(0.65, 0.95);
+
+        SurfaceSample::matte(h_val, color, rough_val)
     }
 }
 
@@ -229,11 +216,4 @@ impl TextureGenerator for ThatchGenerator {
     ) -> Result<TextureMap, TextureError> {
         self.generate_inner(width, height, Some(workspace))
     }
-}
-
-// --- helpers ----------------------------------------------------------------
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
 }

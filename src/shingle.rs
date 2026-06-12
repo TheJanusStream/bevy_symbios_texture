@@ -13,9 +13,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`ShingleGenerator`].
@@ -95,137 +95,143 @@ impl ShingleGenerator {
     }
 }
 
-impl TextureGenerator for ShingleGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: surface + moss grids and the derived layout
+/// constants (rounded scale, exposed fraction).
+struct ShingleCell<'a> {
+    config: &'a ShingleConfig,
+    surf_grid: &'a [f64],
+    moss_grid: &'a [f64],
+    /// `scale` rounded to the nearest integer so the grid tiles exactly.
+    scale: f64,
+    /// Exposed (visible) fraction of each shingle from the bottom.
+    exposed: f64,
+    width: usize,
+}
+
+/// Thin grout / shadow band at the bottom of each exposed portion.
+const GROUT_FRAC: f64 = 0.06;
+
+impl SurfaceCell for ShingleCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+
+        let v_scaled = v * self.scale;
+        let row_id = v_scaled.floor() as i64;
+        let v_frac = v_scaled.fract(); // 0 = bottom of cell, 1 = top
+
+        // Stagger: shift U by row_id × stagger so alternate rows offset.
+        let u_stagger = (u + row_id as f64 * c.stagger).rem_euclid(1.0);
+        let col_id = (u_stagger * self.scale).floor() as i64;
+        let u_frac = (u_stagger * self.scale).fract(); // 0..1 within shingle cell
+
+        // Per-shingle colour variance hash.
+        let cv = cell_hash(col_id, row_id, c.seed);
+
+        // ── Height ramp ──────────────────────────────────────────────
+        // The sawtooth ramp: 0 at the exposed bottom edge, ramps up to 1
+        // at the top.  Only the [0, exposed] portion is visible; above
+        // that is hidden under the shingle from the row above.
+        let ramp = (v_frac / self.exposed).clamp(0.0, 1.0);
+
+        // ── Shape function ───────────────────────────────────────────
+        // `shape_profile=0`: pure ramp (square / flat shingle).
+        // `shape_profile=1`: scalloped — carve a half-circle from the
+        //   bottom corners so the exposed edge is convex in the middle.
+        let dx = (u_frac - 0.5).abs() * 2.0; // 0 at centre, 1 at edge
+        let scallop_drop = c.shape_profile
+            * (1.0 - (1.0 - dx * dx).sqrt()) // half-circle profile
+            * (1.0 - ramp).powi(2); // only affects bottom edge
+        let ramp_shaped = (ramp - scallop_drop).clamp(0.0, 1.0);
+
+        // ── Grout / shadow line ──────────────────────────────────────
+        let in_grout = v_frac < GROUT_FRAC && ramp_shaped < 0.15;
+
+        let idx = y as usize * self.width + x as usize;
+        let surf = normalize(self.surf_grid[idx]);
+        let moss_raw = normalize(self.moss_grid[idx]);
+
+        // Moss grows on the lower exposed portion of each shingle.
+        let moss_weight =
+            c.moss_level * moss_raw * (1.0 - ramp_shaped).powi(3) * (1.0 - in_grout as i32 as f64);
+
+        if in_grout {
+            // Grout / shadow line between rows.  The pre-driver code wrote
+            // the roughness byte as `(0.92 * 255.0) as u8` — truncation to
+            // 234 — so express it as 234/255 for the driver's rounding to
+            // reproduce the same byte.
+            SurfaceSample::matte(0.0, c.color_grout, 234.0 / 255.0)
+        } else {
+            // Shingle surface with micro-detail and moss.
+            let h_val = (ramp_shaped * (0.9 + surf * 0.1) - moss_weight * 0.05).clamp(0.0, 1.0);
+
+            // Tile colour: jitter per cell, darken with moss.
+            let jitter = (cv - 0.5) * 0.12;
+            let moss_green = [0.15f32, 0.28, 0.10];
+            let base_r = (c.color_tile[0] + jitter as f32).clamp(0.0, 1.0);
+            let base_g = (c.color_tile[1] + jitter as f32 * 0.8).clamp(0.0, 1.0);
+            let base_b = (c.color_tile[2] + jitter as f32 * 0.5).clamp(0.0, 1.0);
+            let color = [
+                lerp(base_r, moss_green[0], moss_weight as f32),
+                lerp(base_g, moss_green[1], moss_weight as f32),
+                lerp(base_b, moss_green[2], moss_weight as f32),
+            ];
+
+            // ORM: lower (exposed) areas and moss are rougher.
+            let rough = 0.55 + (1.0 - ramp_shaped as f32) * 0.3 + moss_weight as f32 * 0.1;
+
+            SurfaceSample::matte(h_val, color, rough)
+        }
+    }
+}
+
+impl ShingleGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Surface micro-detail FBM (toroidal for seamless tiling).
-        let surf_grid = sample_grid(&self.surf_noise, width, height);
+        let mut surf_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.surf_noise, width, height, &mut surf_grid);
 
         // Moss noise — low frequency, toroidal.
-        let moss_grid = sample_grid(&self.moss_noise, width, height);
+        let mut moss_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.moss_noise, width, height, &mut moss_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let cell = ShingleCell {
+            config: c,
+            surf_grid: &surf_grid,
+            moss_grid: &moss_grid,
+            scale: c.scale.round(),
+            exposed: (1.0 - c.overlap).clamp(0.05, 1.0),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        // Exposed (visible) fraction of each shingle from the bottom.
-        let exposed = (1.0 - c.overlap).clamp(0.05, 1.0);
-        // Thin grout / shadow band at the bottom of each exposed portion.
-        let grout_frac = 0.06_f64;
-
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        // scale must be an integer for the grid to tile; round to nearest.
-        let scale = c.scale.round();
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-            let v_scaled = v * scale;
-            let row_id = v_scaled.floor() as i64;
-            let v_frac = v_scaled.fract(); // 0 = bottom of cell, 1 = top
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-
-                // Stagger: shift U by row_id × stagger so alternate rows offset.
-                let u_stagger = (u + row_id as f64 * c.stagger).rem_euclid(1.0);
-                let col_id = (u_stagger * scale).floor() as i64;
-                let u_frac = (u_stagger * scale).fract(); // 0..1 within shingle cell
-
-                // Per-shingle colour variance hash.
-                let cv = cell_hash(col_id, row_id, c.seed);
-
-                // ── Height ramp ──────────────────────────────────────────────
-                // The sawtooth ramp: 0 at the exposed bottom edge, ramps up to 1
-                // at the top.  Only the [0, exposed] portion is visible; above
-                // that is hidden under the shingle from the row above.
-                let ramp = (v_frac / exposed).clamp(0.0, 1.0);
-
-                // ── Shape function ───────────────────────────────────────────
-                // `shape_profile=0`: pure ramp (square / flat shingle).
-                // `shape_profile=1`: scalloped — carve a half-circle from the
-                //   bottom corners so the exposed edge is convex in the middle.
-                let dx = (u_frac - 0.5).abs() * 2.0; // 0 at centre, 1 at edge
-                let scallop_drop = c.shape_profile
-                    * (1.0 - (1.0 - dx * dx).sqrt()) // half-circle profile
-                    * (1.0 - ramp).powi(2); // only affects bottom edge
-                let ramp_shaped = (ramp - scallop_drop).clamp(0.0, 1.0);
-
-                // ── Grout / shadow line ──────────────────────────────────────
-                let in_grout = v_frac < grout_frac && ramp_shaped < 0.15;
-
-                let idx = y * w + x;
-                let ai = idx * 4;
-                let surf = normalize(surf_grid[idx]);
-                let moss_raw = normalize(moss_grid[idx]);
-
-                // Moss grows on the lower exposed portion of each shingle.
-                let moss_weight = c.moss_level
-                    * moss_raw
-                    * (1.0 - ramp_shaped).powi(3)
-                    * (1.0 - in_grout as i32 as f64);
-
-                if in_grout {
-                    // Grout / shadow line between rows.
-                    heights[idx] = 0.0;
-                    albedo[ai] = linear_to_srgb(c.color_grout[0]);
-                    albedo[ai + 1] = linear_to_srgb(c.color_grout[1]);
-                    albedo[ai + 2] = linear_to_srgb(c.color_grout[2]);
-                    albedo[ai + 3] = 255;
-                    roughness_buf[ai] = 255;
-                    roughness_buf[ai + 1] = (0.92 * 255.0) as u8;
-                    roughness_buf[ai + 2] = 0;
-                    roughness_buf[ai + 3] = 255;
-                } else {
-                    // Shingle surface with micro-detail and moss.
-                    let h_val =
-                        (ramp_shaped * (0.9 + surf * 0.1) - moss_weight * 0.05).clamp(0.0, 1.0);
-                    heights[idx] = h_val;
-
-                    // Tile colour: jitter per cell, darken with moss.
-                    let jitter = (cv - 0.5) * 0.12;
-                    let moss_green = [0.15f32, 0.28, 0.10];
-                    let base_r = (c.color_tile[0] + jitter as f32).clamp(0.0, 1.0);
-                    let base_g = (c.color_tile[1] + jitter as f32 * 0.8).clamp(0.0, 1.0);
-                    let base_b = (c.color_tile[2] + jitter as f32 * 0.5).clamp(0.0, 1.0);
-                    let r = lerp(base_r, moss_green[0], moss_weight as f32);
-                    let g = lerp(base_g, moss_green[1], moss_weight as f32);
-                    let b = lerp(base_b, moss_green[2], moss_weight as f32);
-
-                    albedo[ai] = linear_to_srgb(r);
-                    albedo[ai + 1] = linear_to_srgb(g);
-                    albedo[ai + 2] = linear_to_srgb(b);
-                    albedo[ai + 3] = 255;
-
-                    // ORM: lower (exposed) areas and moss are rougher.
-                    let rough = 0.55 + (1.0 - ramp_shaped as f32) * 0.3 + moss_weight as f32 * 0.1;
-                    roughness_buf[ai] = 255;
-                    roughness_buf[ai + 1] = (rough.clamp(0.0, 1.0) * 255.0).round() as u8;
-                    roughness_buf[ai + 2] = 0;
-                    roughness_buf[ai + 3] = 255;
-                }
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(surf_grid);
+            ws.return_grid(moss_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for ShingleGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 
@@ -239,14 +245,4 @@ fn cell_hash(col: i64, row: i64, seed: u32) -> f64 {
     h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
     h ^= h >> 33;
     (h as f64) * (1.0 / u64::MAX as f64)
-}
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
-}
-
-#[inline]
-fn normalize(v: f64) -> f64 {
-    v * 0.5 + 0.5
 }

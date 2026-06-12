@@ -7,9 +7,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
     noise::{ToroidalNoise, normalize},
-    normal::{BoundaryMode, height_to_normal},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`GroundGenerator`].
@@ -88,71 +88,68 @@ impl GroundGenerator {
     }
 }
 
-impl TextureGenerator for GroundGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
-        validate_dimensions(width, height)?;
-        let c = &self.config;
+/// Per-pixel sampler over the two FBM layers.
+///
+/// Samples the toroidal noise analytically at (u, v) rather than through a
+/// precomputed grid: the LUT path computes `TAU * x / w` where the analytic
+/// path computes `TAU * (x / w)`, which differs in the last ulp — switching
+/// would break byte parity with the pre-driver output.
+struct GroundCell<'a> {
+    config: &'a GroundConfig,
+    macro_noise: &'a ToroidalNoise<Fbm<Perlin>>,
+    micro_noise: &'a ToroidalNoise<Fbm<Perlin>>,
+}
 
-        let w = width as f64;
-        let h = height as f64;
-        let n = (width as usize) * (height as usize);
+impl SurfaceCell for GroundCell<'_> {
+    fn sample(&self, _x: u32, _y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness = vec![0u8; n * 4];
+        let macro_val = normalize(self.macro_noise.get(u, v));
+        let micro_val = normalize(self.micro_noise.get(u, v));
+        let t = macro_val * (1.0 - c.micro_weight) + micro_val * c.micro_weight;
 
-        for y in 0..height {
-            for x in 0..width {
-                let idx = (y * width + x) as usize;
-                let u = x as f64 / w;
-                let v = y as f64 / h;
+        let tf = t as f32;
+        let color = [
+            lerp(c.color_moist[0], c.color_dry[0], tf),
+            lerp(c.color_moist[1], c.color_dry[1], tf),
+            lerp(c.color_moist[2], c.color_dry[2], tf),
+        ];
 
-                let macro_val = normalize(self.macro_noise.get(u, v));
-                let micro_val = normalize(self.micro_noise.get(u, v));
+        // Ground is generally rough; slight variation by moisture.
+        let rough = 0.80 + (1.0 - tf) * 0.15;
 
-                let t = macro_val * (1.0 - c.micro_weight) + micro_val * c.micro_weight;
-                heights[idx] = t;
-
-                let tf = t as f32;
-                let r = lerp(c.color_moist[0], c.color_dry[0], tf);
-                let g = lerp(c.color_moist[1], c.color_dry[1], tf);
-                let b = lerp(c.color_moist[2], c.color_dry[2], tf);
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // Ground is generally rough; slight variation by moisture.
-                // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
-                let rough = 0.80 + (1.0 - tf) * 0.15;
-                roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
-                roughness[ai + 1] = (rough * 255.0).round() as u8;
-                roughness[ai + 2] = 0; // Metallic = 0.0
-                roughness[ai + 3] = 255;
-            }
-        }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness,
-            width,
-            height,
-        })
+        SurfaceSample::matte(t, color, rough)
     }
 }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+impl GroundGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
+        let cell = GroundCell {
+            config: &self.config,
+            macro_noise: &self.macro_noise,
+            micro_noise: &self.micro_noise,
+        };
+        generate_surface(width, height, self.config.normal_strength, ws, &cell)
+    }
+}
+
+impl TextureGenerator for GroundGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

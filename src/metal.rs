@@ -14,9 +14,9 @@ use std::f64::consts::TAU;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Visual style of the metal surface.
@@ -111,114 +111,131 @@ impl MetalGenerator {
     }
 }
 
-impl TextureGenerator for MetalGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
-        validate_dimensions(width, height)?;
-        let c = &self.config;
+/// Per-generation sampler: precomputed rust grid + per-pixel anisotropic
+/// scratch noise (sampled analytically — the brushed style's stretched torus
+/// coordinates have no grid equivalent).
+struct MetalCell<'a> {
+    config: &'a MetalConfig,
+    fbm_scratch: &'a Fbm<Perlin>,
+    rust_grid: &'a [f64],
+    width: usize,
+}
 
-        // Rust patches — separate seed, low frequency for large blotches.
-        let rust_grid = sample_grid(&self.rust_noise, width, height);
+impl SurfaceCell for MetalCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        // Standing-seam ridge profile (sinusoidal bumps in V).
+        // seam_count must be an integer for the pattern to tile; round to nearest.
+        let seam_count = c.seam_count.round();
+        let seam_h = if c.style == MetalStyle::StandingSeam {
+            let phase = (v * seam_count * TAU).sin();
+            // Raise to power to sharpen; clamp to [0,1].
+            phase.abs().powf(c.seam_sharpness.max(0.1)) * phase.signum() * 0.5 + 0.5
+        } else {
+            0.0
+        };
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            // Standing-seam ridge profile (sinusoidal bumps in V).
-            // seam_count must be an integer for the pattern to tile; round to nearest.
-            let seam_count = c.seam_count.round();
-            let seam_h = if c.style == MetalStyle::StandingSeam {
-                let phase = (v * seam_count * TAU).sin();
-                // Raise to power to sharpen; clamp to [0,1].
-                phase.abs().powf(c.seam_sharpness.max(0.1)) * phase.signum() * 0.5 + 0.5
-            } else {
-                0.0
-            };
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-
-                // Sample scratch noise.
-                // Brushed: large radius in U (fast oscillations → many horizontal
-                // scratches), small radius in V (slow → scratches run lengthwise).
-                // StandingSeam: uniform toroidal sampling for micro-detail.
-                let scratch = match c.style {
-                    MetalStyle::Brushed => {
-                        let nx = (TAU * u).cos() * c.scale * c.brush_stretch;
-                        let ny = (TAU * u).sin() * c.scale * c.brush_stretch;
-                        let nz = (TAU * v).cos() * c.scale * 0.12;
-                        let nw = (TAU * v).sin() * c.scale * 0.12;
-                        self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
-                    }
-                    MetalStyle::StandingSeam => {
-                        let nx = (TAU * u).cos() * c.scale;
-                        let ny = (TAU * u).sin() * c.scale;
-                        let nz = (TAU * v).cos() * c.scale;
-                        let nw = (TAU * v).sin() * c.scale;
-                        self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
-                    }
-                };
-
-                let idx = y * w + x;
-                let rust_t = normalize(rust_grid[idx]);
-                // Soft threshold → rust coverage.
-                let rust_blend = ((rust_t - (1.0 - c.rust_level)).clamp(0.0, c.rust_level)
-                    / c.rust_level.max(1e-9))
-                .clamp(0.0, 1.0);
-
-                let h_scratch = scratch * c.roughness * 0.3;
-                let h_val = match c.style {
-                    MetalStyle::Brushed => h_scratch,
-                    MetalStyle::StandingSeam => seam_h * 0.7 + h_scratch * 0.3,
-                };
-                heights[idx] = h_val;
-
-                // Colour: lerp metal → rust.
-                let r = lerp(c.color_metal[0], c.color_rust[0], rust_blend as f32);
-                let g = lerp(c.color_metal[1], c.color_rust[1], rust_blend as f32);
-                let b = lerp(c.color_metal[2], c.color_rust[2], rust_blend as f32);
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: rust raises roughness and kills metallic.
-                let rough = (c.roughness as f32 + rust_blend as f32 * 0.65).clamp(0.0, 1.0);
-                let met = (c.metallic - rust_blend as f32 * 0.80).clamp(0.0, 1.0);
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-                roughness_buf[ai + 2] = (met * 255.0).round() as u8;
-                roughness_buf[ai + 3] = 255;
+        // Sample scratch noise.
+        // Brushed: large radius in U (fast oscillations → many horizontal
+        // scratches), small radius in V (slow → scratches run lengthwise).
+        // StandingSeam: uniform toroidal sampling for micro-detail.
+        let scratch = match c.style {
+            MetalStyle::Brushed => {
+                let nx = (TAU * u).cos() * c.scale * c.brush_stretch;
+                let ny = (TAU * u).sin() * c.scale * c.brush_stretch;
+                let nz = (TAU * v).cos() * c.scale * 0.12;
+                let nw = (TAU * v).sin() * c.scale * 0.12;
+                self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
             }
+            MetalStyle::StandingSeam => {
+                let nx = (TAU * u).cos() * c.scale;
+                let ny = (TAU * u).sin() * c.scale;
+                let nz = (TAU * v).cos() * c.scale;
+                let nw = (TAU * v).sin() * c.scale;
+                self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
+            }
+        };
+
+        let idx = y as usize * self.width + x as usize;
+        let rust_t = normalize(self.rust_grid[idx]);
+        // Soft threshold → rust coverage.
+        let rust_blend = ((rust_t - (1.0 - c.rust_level)).clamp(0.0, c.rust_level)
+            / c.rust_level.max(1e-9))
+        .clamp(0.0, 1.0);
+
+        let h_scratch = scratch * c.roughness * 0.3;
+        let h_val = match c.style {
+            MetalStyle::Brushed => h_scratch,
+            MetalStyle::StandingSeam => seam_h * 0.7 + h_scratch * 0.3,
+        };
+
+        // Colour: lerp metal → rust.
+        let color = [
+            lerp(c.color_metal[0], c.color_rust[0], rust_blend as f32),
+            lerp(c.color_metal[1], c.color_rust[1], rust_blend as f32),
+            lerp(c.color_metal[2], c.color_rust[2], rust_blend as f32),
+        ];
+
+        // ORM: rust raises roughness and kills metallic.
+        let rough = (c.roughness as f32 + rust_blend as f32 * 0.65).clamp(0.0, 1.0);
+        let met = (c.metallic - rust_blend as f32 * 0.80).clamp(0.0, 1.0);
+
+        SurfaceSample {
+            height: h_val,
+            color,
+            roughness: rough,
+            metallic: met,
+            occlusion: 1.0,
         }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
     }
 }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+impl MetalGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
+
+        // Rust patches — separate seed, low frequency for large blotches.
+        let mut rust_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.rust_noise, width, height, &mut rust_grid);
+
+        let cell = MetalCell {
+            config: &self.config,
+            fbm_scratch: &self.fbm_scratch,
+            rust_grid: &rust_grid,
+            width: width as usize,
+        };
+        let result = generate_surface(
+            width,
+            height,
+            self.config.normal_strength,
+            ws.as_deref_mut(),
+            &cell,
+        );
+
+        if let Some(ws) = ws {
+            ws.return_grid(rust_grid);
+        }
+        result
+    }
+}
+
+impl TextureGenerator for MetalGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

@@ -16,8 +16,9 @@ use noise::{Fbm, MultiFractal, NoiseFn, Perlin, Worley};
 
 use crate::{
     generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::ToroidalNoise,
+    noise::{ToroidalNoise, normalize},
     normal::{BoundaryMode, height_to_normal},
+    surface::lerp,
 };
 
 /// Configures the appearance of a [`PlankGenerator`].
@@ -268,20 +269,10 @@ fn cell_hash(cell: i64, salt: u64, seed: u32) -> f64 {
 }
 
 #[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
-}
-
-#[inline]
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [
         lerp(a[0], b[0], t),
         lerp(a[1], b[1], t),
         lerp(a[2], b[2], t),
     ]
-}
-
-#[inline]
-fn normalize(v: f64) -> f64 {
-    v * 0.5 + 0.5
 }

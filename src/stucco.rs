@@ -7,9 +7,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`StuccoGenerator`].
@@ -72,62 +72,81 @@ impl StuccoGenerator {
     }
 }
 
-impl TextureGenerator for StuccoGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
-        validate_dimensions(width, height)?;
-        let c = &self.config;
+/// Per-generation sampler: precomputed FBM grid + config.
+struct StuccoCell<'a> {
+    config: &'a StuccoConfig,
+    grid: &'a [f64],
+    width: usize,
+}
 
-        let heights = sample_grid(&self.noise, width, height);
+impl SurfaceCell for StuccoCell<'_> {
+    fn sample(&self, x: u32, y: u32, _u: f64, _v: f64) -> SurfaceSample {
+        let c = self.config;
+        let raw = self.grid[y as usize * self.width + x as usize];
 
-        let n = (width as usize) * (height as usize);
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
+        // normalize maps [-1,1] → [0,1]; scale by roughness amplitude.
+        let t = (normalize(raw) * c.roughness) as f32;
 
-        for (i, &h) in heights.iter().enumerate() {
-            // normalize maps [-1,1] → [0,1]; scale by roughness amplitude.
-            let t = (normalize(h) * c.roughness) as f32;
+        let color = [
+            lerp(c.color_shadow[0], c.color_base[0], t),
+            lerp(c.color_shadow[1], c.color_base[1], t),
+            lerp(c.color_shadow[2], c.color_base[2], t),
+        ];
 
-            let r = lerp(c.color_shadow[0], c.color_base[0], t);
-            let g = lerp(c.color_shadow[1], c.color_base[1], t);
-            let b = lerp(c.color_shadow[2], c.color_base[2], t);
+        // Matte finish: high roughness, zero metallic.
+        // Recessed bumps (low t) are slightly rougher (shadow/grit).
+        let rough = (0.82 + (1.0 - t) * 0.10).clamp(0.0, 1.0);
 
-            let ai = i * 4;
-            albedo[ai] = linear_to_srgb(r);
-            albedo[ai + 1] = linear_to_srgb(g);
-            albedo[ai + 2] = linear_to_srgb(b);
-            albedo[ai + 3] = 255;
-
-            // Matte finish: high roughness, zero metallic.
-            // Recessed bumps (low t) are slightly rougher (shadow/grit).
-            let rough = (0.82 + (1.0 - t) * 0.10).clamp(0.0, 1.0);
-            roughness_buf[ai] = 255; // Occlusion = 1.0
-            roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-            roughness_buf[ai + 2] = 0; // Metallic = 0.0
-            roughness_buf[ai + 3] = 255;
-        }
-
-        // Scale the height map by roughness so the normal map also respects
-        // bump amplitude (not just the albedo interpolation above).
-        let heights_scaled: Vec<f64> = heights.iter().map(|&h| h * c.roughness).collect();
-        let normal = height_to_normal(
-            &heights_scaled,
-            width,
-            height,
-            c.normal_strength * 0.5,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+        // Scale the height by roughness so the normal map also respects
+        // bump amplitude (not just the albedo interpolation above); raw
+        // [-1, 1] range, so generate_inner halves the strength.
+        SurfaceSample::matte(raw * c.roughness, color, rough)
     }
 }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+impl StuccoGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
+
+        let mut grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.noise, width, height, &mut grid);
+
+        let cell = StuccoCell {
+            config: &self.config,
+            grid: &grid,
+            width: width as usize,
+        };
+        let result = generate_surface(
+            width,
+            height,
+            self.config.normal_strength * 0.5,
+            ws.as_deref_mut(),
+            &cell,
+        );
+
+        if let Some(ws) = ws {
+            ws.return_grid(grid);
+        }
+        result
+    }
+}
+
+impl TextureGenerator for StuccoGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

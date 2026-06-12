@@ -17,9 +17,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, bilinear_sample_torus, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`WainscotingGenerator`].
@@ -98,136 +98,130 @@ impl WainscotingGenerator {
     }
 }
 
-impl TextureGenerator for WainscotingGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: grain + warp grids and derived panel-layout
+/// constants.
+struct WainscotingCell<'a> {
+    config: &'a WainscotingConfig,
+    grain_grid: &'a [f64],
+    warp_grid: &'a [f64],
+    panels_x: usize,
+    panels_y: usize,
+    /// Half panel extents (cell-local) and bevel band width derived from
+    /// `frame_width`.
+    panel_hx: f64,
+    panel_hy: f64,
+    bevel_w: f64,
+    w: usize,
+    h: usize,
+}
+
+impl SurfaceCell for WainscotingCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.w + x as usize;
+
+        // Domain warp: nudge U coordinate by warp FBM to bend grain lines.
+        let warp_u = normalize(self.warp_grid[idx]) - 0.5; // [-0.5, 0.5]
+        let warped_u = (u + warp_u * c.grain_warp * 0.1).rem_euclid(1.0);
+
+        // Bilinearly sample grain grid at warped position.
+        let grain_raw = bilinear_sample_torus(self.grain_grid, self.w, self.h, warped_u, v);
+        let grain_t = normalize(grain_raw); // [0, 1]
+
+        // Panel SDF classification.
+        // Local position within the cell, centered in [-0.5, 0.5].
+        let cell_u = (u * self.panels_x as f64).fract();
+        let cell_v = (v * self.panels_y as f64).fract();
+        let cx = cell_u - 0.5;
+        let cy = cell_v - 0.5;
+
+        // Distance from panel interior (positive = inside panel, away from frame).
+        let dist_to_frame_u = self.panel_hx - cx.abs();
+        let dist_to_frame_v = self.panel_hy - cy.abs();
+        let dist_inside = dist_to_frame_u.min(dist_to_frame_v);
+
+        let panel_height = if dist_inside < 0.0 {
+            // Frame band — highest surface.
+            1.0_f64
+        } else if dist_inside < self.bevel_w {
+            // Bevel ramp from frame height down to recessed panel face.
+            1.0 - (dist_inside / self.bevel_w) * c.panel_inset
+        } else {
+            // Recessed panel face.
+            1.0 - c.panel_inset
+        };
+
+        // Colour: dark-to-light lerp driven by grain.
+        let color = [
+            lerp(c.color_wood_dark[0], c.color_wood_light[0], grain_t as f32),
+            lerp(c.color_wood_dark[1], c.color_wood_light[1], grain_t as f32),
+            lerp(c.color_wood_dark[2], c.color_wood_light[2], grain_t as f32),
+        ];
+
+        // ORM: slightly rougher in the dark grain trenches.
+        let rough = (0.75 + grain_t * 0.1) as f32;
+
+        // Final height: structural panel height + tiny grain micro-detail.
+        SurfaceSample::matte(
+            (panel_height + grain_t * 0.05).clamp(0.0, 1.0),
+            color,
+            rough,
+        )
+    }
+}
+
+impl WainscotingGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Grain FBM: anisotropic-ish, high frequency across the grain direction.
-        let grain_grid = sample_grid(&self.grain_noise, width, height);
+        let mut grain_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.grain_noise, width, height, &mut grain_grid);
 
         // Warp FBM: low frequency, used to domain-warp the grain UV.
-        let warp_grid = sample_grid(&self.warp_noise, width, height);
+        let mut warp_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.warp_noise, width, height, &mut warp_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
-
-        let panels_x = c.panels_x.max(1);
-        let panels_y = c.panels_y.max(1);
         let fw = (c.frame_width * 0.5).clamp(0.0, 0.48);
-        let panel_hx = 0.5 - fw;
-        let panel_hy = 0.5 - fw;
-        let bevel_w = fw * 0.3;
+        let cell = WainscotingCell {
+            config: c,
+            grain_grid: &grain_grid,
+            warp_grid: &warp_grid,
+            panels_x: c.panels_x.max(1),
+            panels_y: c.panels_y.max(1),
+            panel_hx: 0.5 - fw,
+            panel_hy: 0.5 - fw,
+            bevel_w: fw * 0.3,
+            w: width as usize,
+            h: height as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let idx = y * w + x;
-
-                // Domain warp: nudge U coordinate by warp FBM to bend grain lines.
-                let warp_u = normalize(warp_grid[idx]) - 0.5; // [-0.5, 0.5]
-                let warped_u = (u + warp_u * c.grain_warp * 0.1).rem_euclid(1.0);
-
-                // Bilinearly sample grain grid at warped position.
-                let grain_raw = bilinear_sample_torus(&grain_grid, w, h, warped_u, v);
-                let grain_t = normalize(grain_raw); // [0, 1]
-
-                // Panel SDF classification.
-                // Local position within the cell, centered in [-0.5, 0.5].
-                let cell_u = (u * panels_x as f64).fract();
-                let cell_v = (v * panels_y as f64).fract();
-                let cx = cell_u - 0.5;
-                let cy = cell_v - 0.5;
-
-                // Distance from panel interior (positive = inside panel, away from frame).
-                let dist_to_frame_u = panel_hx - cx.abs();
-                let dist_to_frame_v = panel_hy - cy.abs();
-                let dist_inside = dist_to_frame_u.min(dist_to_frame_v);
-
-                let panel_height = if dist_inside < 0.0 {
-                    // Frame band — highest surface.
-                    1.0_f64
-                } else if dist_inside < bevel_w {
-                    // Bevel ramp from frame height down to recessed panel face.
-                    1.0 - (dist_inside / bevel_w) * c.panel_inset
-                } else {
-                    // Recessed panel face.
-                    1.0 - c.panel_inset
-                };
-
-                // Final height: structural panel height + tiny grain micro-detail.
-                heights[idx] = (panel_height + grain_t * 0.05).clamp(0.0, 1.0);
-
-                // Colour: dark-to-light lerp driven by grain.
-                let r = lerp(c.color_wood_dark[0], c.color_wood_light[0], grain_t as f32);
-                let g = lerp(c.color_wood_dark[1], c.color_wood_light[1], grain_t as f32);
-                let b = lerp(c.color_wood_dark[2], c.color_wood_light[2], grain_t as f32);
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: slightly rougher in the dark grain trenches.
-                let rough = 0.75 + grain_t * 0.1;
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(grain_grid);
+            ws.return_grid(warp_grid);
         }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+        result
     }
 }
 
-// --- helpers ----------------------------------------------------------------
+impl TextureGenerator for WainscotingGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-/// Toroidal bilinear sample of a precomputed grid.
-///
-/// `u` and `v` are in `[0, 1]` and wrap at the edges.  The four nearest grid
-/// pixels are blended with standard bilinear weights.
-fn bilinear_sample_torus(grid: &[f64], w: usize, h: usize, u: f64, v: f64) -> f64 {
-    let u = u.rem_euclid(1.0);
-    let v = v.rem_euclid(1.0);
-    let px = u * w as f64;
-    let py = v * h as f64;
-    let x0 = px as usize % w;
-    let y0 = py as usize % h;
-    let x1 = (x0 + 1) % w;
-    let y1 = (y0 + 1) % h;
-    let fx = px.fract();
-    let fy = py.fract();
-    let v00 = grid[y0 * w + x0];
-    let v10 = grid[y0 * w + x1];
-    let v01 = grid[y1 * w + x0];
-    let v11 = grid[y1 * w + x1];
-    v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
-}
-
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

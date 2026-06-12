@@ -6,9 +6,9 @@
 use noise::{MultiFractal, Perlin, RidgedMulti};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`RockGenerator`].
@@ -73,61 +73,79 @@ impl RockGenerator {
     }
 }
 
-impl TextureGenerator for RockGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
-        validate_dimensions(width, height)?;
-        let c = &self.config;
+/// Per-generation sampler: precomputed ridged-multifractal grid + config.
+struct RockCell<'a> {
+    config: &'a RockConfig,
+    grid: &'a [f64],
+    width: usize,
+}
 
-        let heights = sample_grid(&self.noise, width, height);
+impl SurfaceCell for RockCell<'_> {
+    fn sample(&self, x: u32, y: u32, _u: f64, _v: f64) -> SurfaceSample {
+        let c = self.config;
+        let raw = self.grid[y as usize * self.width + x as usize];
+        let t = normalize(raw) as f32;
 
-        let n = (width as usize) * (height as usize);
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness = vec![0u8; n * 4];
+        let color = [
+            lerp(c.color_dark[0], c.color_light[0], t),
+            lerp(c.color_dark[1], c.color_light[1], t),
+            lerp(c.color_dark[2], c.color_light[2], t),
+        ];
 
-        for (i, &height) in heights.iter().enumerate() {
-            let t = normalize(height) as f32;
+        // Ridges (high t) are slightly smoother (exposed mineral); cracks rougher.
+        let rough = (0.75 - t * 0.25).clamp(0.0, 1.0);
 
-            let r = lerp(c.color_dark[0], c.color_light[0], t);
-            let g = lerp(c.color_dark[1], c.color_light[1], t);
-            let b = lerp(c.color_dark[2], c.color_light[2], t);
-
-            let ai = i * 4;
-            albedo[ai] = linear_to_srgb(r);
-            albedo[ai + 1] = linear_to_srgb(g);
-            albedo[ai + 2] = linear_to_srgb(b);
-            albedo[ai + 3] = 255;
-
-            // Ridges (high t) are slightly smoother (exposed mineral); cracks rougher.
-            // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
-            // RidgedMulti output is not strictly bounded; clamp before casting.
-            let rough = (0.75 - t * 0.25).clamp(0.0, 1.0);
-            roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
-            roughness[ai + 1] = (rough * 255.0).round() as u8;
-            roughness[ai + 2] = 0; // Metallic = 0.0
-            roughness[ai + 3] = 255;
-        }
-
-        // heights is in [-1, 1]; normalize would scale gradients by 0.5.
-        // Halving strength here is equivalent and avoids a full-sized allocation.
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength * 0.5,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness,
-            width,
-            height,
-        })
+        // Height stays raw [-1, 1]; generate_inner compensates with
+        // strength × 0.5 instead of normalising the whole grid.
+        SurfaceSample::matte(raw, color, rough)
     }
 }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+impl RockGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
+
+        let mut grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.noise, width, height, &mut grid);
+
+        let cell = RockCell {
+            config: &self.config,
+            grid: &grid,
+            width: width as usize,
+        };
+        // Grid values span [-1, 1] (range 2): halving the strength is
+        // equivalent to normalising and avoids a full-sized allocation.
+        let result = generate_surface(
+            width,
+            height,
+            self.config.normal_strength * 0.5,
+            ws.as_deref_mut(),
+            &cell,
+        );
+
+        if let Some(ws) = ws {
+            ws.return_grid(grid);
+        }
+        result
+    }
+}
+
+impl TextureGenerator for RockGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

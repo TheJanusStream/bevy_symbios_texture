@@ -11,9 +11,9 @@ use std::f64::consts::TAU;
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`ConcreteGenerator`].
@@ -96,96 +96,109 @@ impl ConcreteGenerator {
     }
 }
 
-impl TextureGenerator for ConcreteGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
-        validate_dimensions(width, height)?;
-        let c = &self.config;
+/// Per-generation sampler: precomputed surface + pit FBM grids and config.
+struct ConcreteCell<'a> {
+    config: &'a ConcreteConfig,
+    surf: &'a [f64],
+    pits: &'a [f64],
+    width: usize,
+}
 
-        // Main surface FBM — smooth, low-frequency bumps.
-        let surf = sample_grid(&self.surf_noise, width, height);
+impl SurfaceCell for ConcreteCell<'_> {
+    fn sample(&self, x: u32, y: u32, _u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
 
-        // High-frequency pit noise — separate seed.
-        let pits = sample_grid(&self.pit_noise, width, height);
+        // Formwork lines: thin cosine groove repeated `formwork_lines` times in V.
+        // Must be an integer count for the pattern to tile; round to nearest.
+        let formwork_lines = c.formwork_lines.round();
+        let line_groove = if formwork_lines > 0.0 {
+            let phase = (v * formwork_lines * TAU).cos();
+            // Groove deepest where phase = +1 (peaks), shallow elsewhere.
+            ((phase * 0.5 + 0.5) * c.formwork_depth).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let idx = y as usize * self.width + x as usize;
+        let surf_t = normalize(self.surf[idx]);
+        let pit_t = normalize(self.pits[idx]);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
+        // Pits: pixels where pit noise exceeds (1 - density) threshold.
+        let threshold = (1.0 - c.pit_density.clamp(0.0, 0.5)).max(0.5);
+        let pit_depth = if pit_t > threshold {
+            let d = (pit_t - threshold) / (1.0 - threshold).max(1e-9);
+            d * 0.4
+        } else {
+            0.0
+        };
 
-        for y in 0..h {
-            let v = y as f64 / h as f64;
+        let h_val = (surf_t * c.roughness - line_groove - pit_depth).clamp(0.0, 1.0);
 
-            // Formwork lines: thin cosine groove repeated `formwork_lines` times in V.
-            // Must be an integer count for the pattern to tile; round to nearest.
-            let formwork_lines = c.formwork_lines.round();
-            let line_groove = if formwork_lines > 0.0 {
-                let phase = (v * formwork_lines * TAU).cos();
-                // Groove deepest where phase = +1 (peaks), shallow elsewhere.
-                ((phase * 0.5 + 0.5) * c.formwork_depth).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+        // Colour: pits and formwork grooves are darker.
+        let shadow = (pit_depth as f32 * 4.0 + line_groove as f32 * 5.0).clamp(0.0, 1.0);
+        let color = [
+            lerp(c.color_base[0], c.color_pit[0], shadow),
+            lerp(c.color_base[1], c.color_pit[1], shadow),
+            lerp(c.color_base[2], c.color_pit[2], shadow),
+        ];
 
-            for x in 0..w {
-                let idx = y * w + x;
-                let surf_t = normalize(surf[idx]);
-                let pit_t = normalize(pits[idx]);
+        // ORM: rough, no metallic; pits slightly rougher.
+        let rough = (0.80 + shadow * 0.12).clamp(0.0, 1.0);
 
-                // Pits: pixels where pit noise exceeds (1 - density) threshold.
-                let threshold = (1.0 - c.pit_density.clamp(0.0, 0.5)).max(0.5);
-                let pit_depth = if pit_t > threshold {
-                    let d = (pit_t - threshold) / (1.0 - threshold).max(1e-9);
-                    d * 0.4
-                } else {
-                    0.0
-                };
-
-                let h_val = (surf_t * c.roughness - line_groove - pit_depth).clamp(0.0, 1.0);
-                heights[idx] = h_val;
-
-                // Colour: pits and formwork grooves are darker.
-                let shadow = (pit_depth as f32 * 4.0 + line_groove as f32 * 5.0).clamp(0.0, 1.0);
-                let r = lerp(c.color_base[0], c.color_pit[0], shadow);
-                let g = lerp(c.color_base[1], c.color_pit[1], shadow);
-                let b = lerp(c.color_base[2], c.color_pit[2], shadow);
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: rough, no metallic; pits slightly rougher.
-                let rough = (0.80 + shadow * 0.12).clamp(0.0, 1.0);
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
-        }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+        SurfaceSample::matte(h_val, color, rough)
     }
 }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+impl ConcreteGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
+        validate_dimensions(width, height)?;
+
+        // Main surface FBM — smooth, low-frequency bumps.
+        let mut surf = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.surf_noise, width, height, &mut surf);
+
+        // High-frequency pit noise — separate seed.
+        let mut pits = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.pit_noise, width, height, &mut pits);
+
+        let cell = ConcreteCell {
+            config: &self.config,
+            surf: &surf,
+            pits: &pits,
+            width: width as usize,
+        };
+        let result = generate_surface(
+            width,
+            height,
+            self.config.normal_strength,
+            ws.as_deref_mut(),
+            &cell,
+        );
+
+        if let Some(ws) = ws {
+            ws.return_grid(surf);
+            ws.return_grid(pits);
+        }
+        result
+    }
+}
+
+impl TextureGenerator for ConcreteGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
+
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

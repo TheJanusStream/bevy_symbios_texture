@@ -20,9 +20,9 @@ use std::f64::consts::TAU;
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
 /// Configures the appearance of a [`CorrugatedGenerator`].
@@ -98,122 +98,130 @@ impl CorrugatedGenerator {
     }
 }
 
-impl TextureGenerator for CorrugatedGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: micro + rust grids and the rounded ridge count.
+struct CorrugatedCell<'a> {
+    config: &'a CorrugatedConfig,
+    micro_grid: &'a [f64],
+    rust_grid: &'a [f64],
+    /// `ridges` rounded to the nearest integer so the pattern tiles exactly.
+    ridges: f64,
+    width: usize,
+}
+
+impl SurfaceCell for CorrugatedCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.width + x as usize;
+
+        // Corrugation ridge profile: sine wave along U, remapped to [0, 1].
+        // Peaks (ridge tops) → 1.0; troughs (valleys) → 0.0.
+        let ridge_h = (u * self.ridges * TAU).sin() * 0.5 + 0.5;
+
+        // Surface micro-detail and rust noise, normalised to [0, 1].
+        let surf = normalize(self.micro_grid[idx]);
+        let rust_n = normalize(self.rust_grid[idx]);
+
+        // V-direction rust streaks: sample rust noise offset slightly in V
+        // to create horizontal drips running down from valley centres.
+        // The streak factor biases toward the lower half of the V range,
+        // simulating gravity-driven rust runs.
+        let streak_v = (v + rust_n * 0.15).rem_euclid(1.0);
+        let streak_bias = (streak_v * TAU).sin() * 0.5 + 0.5;
+
+        // Rust mask: accumulates in valleys (low ridge_h), scaled by noise
+        // and V-direction streaking.  Valleys = (1.0 - ridge_h) raised to
+        // a power to concentrate rust at the bottom of the trough.
+        let valley_factor = (1.0 - ridge_h).powf(1.5);
+        let rust_mask =
+            (valley_factor * rust_n * (0.7 + streak_bias * 0.3) * c.rust_level).clamp(0.0, 1.0);
+
+        // Height: ridge profile dominates; micro-detail adds fine surface texture.
+        let h_val = (ridge_h * c.ridge_depth + surf * 0.05).clamp(0.0, 1.0);
+
+        // Colour: lerp metal → rust, with a subtle brightness perturbation
+        // from the micro-detail layer that suggests scratches and sheen.
+        let metal_bright = lerp(0.85, 1.0, surf as f32);
+        let rust_mask_f = rust_mask as f32;
+        let color = [
+            lerp(
+                c.color_metal[0] * metal_bright,
+                c.color_rust[0],
+                rust_mask_f,
+            ),
+            lerp(
+                c.color_metal[1] * metal_bright,
+                c.color_rust[1],
+                rust_mask_f,
+            ),
+            lerp(
+                c.color_metal[2] * metal_bright,
+                c.color_rust[2],
+                rust_mask_f,
+            ),
+        ];
+
+        // ORM: rust raises roughness and suppresses metallic.
+        let rough = (c.roughness as f32 + rust_mask_f * 0.4).clamp(0.0, 1.0);
+        let met = (c.metallic - rust_mask_f * 0.7 * c.metallic).clamp(0.0, 1.0);
+
+        SurfaceSample {
+            height: h_val,
+            color,
+            roughness: rough,
+            metallic: met,
+            occlusion: 1.0,
+        }
+    }
+}
+
+impl CorrugatedGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Micro-detail FBM — higher frequency for surface scratches and
         // manufacturing texture.  Uses `ridges * 0.5` as the toroidal radius
         // so the detail density scales with the number of corrugation ridges.
-        let micro_grid = sample_grid(&self.micro_noise, width, height);
+        let mut micro_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.micro_noise, width, height, &mut micro_grid);
 
         // Rust noise — separate seed, lower frequency for blotchy weathering.
-        // A separate V-direction streaking pass uses a portion of this same grid
-        // to simulate vertical rust runs from the ridges.
-        let rust_grid = sample_grid(&self.rust_noise, width, height);
+        let mut rust_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.rust_noise, width, height, &mut rust_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let cell = CorrugatedCell {
+            config: c,
+            micro_grid: &micro_grid,
+            rust_grid: &rust_grid,
+            ridges: c.ridges.round(),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        // Round ridges to the nearest integer so the pattern tiles exactly.
-        let ridges = c.ridges.round();
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let idx = y * w + x;
-
-                // Corrugation ridge profile: sine wave along U, remapped to [0, 1].
-                // Peaks (ridge tops) → 1.0; troughs (valleys) → 0.0.
-                let ridge_h = (u * ridges * TAU).sin() * 0.5 + 0.5;
-
-                // Surface micro-detail and rust noise, normalised to [0, 1].
-                let surf = normalize(micro_grid[idx]);
-                let rust_n = normalize(rust_grid[idx]);
-
-                // V-direction rust streaks: sample rust noise offset slightly in V
-                // to create horizontal drips running down from valley centres.
-                // The streak factor biases toward the lower half of the V range,
-                // simulating gravity-driven rust runs.
-                let streak_v = (v + rust_n * 0.15).rem_euclid(1.0);
-                let streak_bias = (streak_v * TAU).sin() * 0.5 + 0.5;
-
-                // Rust mask: accumulates in valleys (low ridge_h), scaled by noise
-                // and V-direction streaking.  Valleys = (1.0 - ridge_h) raised to
-                // a power to concentrate rust at the bottom of the trough.
-                let valley_factor = (1.0 - ridge_h).powf(1.5);
-                let rust_mask = (valley_factor * rust_n * (0.7 + streak_bias * 0.3) * c.rust_level)
-                    .clamp(0.0, 1.0);
-
-                // Height: ridge profile dominates; micro-detail adds fine surface texture.
-                let h_val = (ridge_h * c.ridge_depth + surf * 0.05).clamp(0.0, 1.0);
-                heights[idx] = h_val;
-
-                // Colour: lerp metal → rust, with a subtle brightness perturbation
-                // from the micro-detail layer that suggests scratches and sheen.
-                let metal_bright = lerp(0.85, 1.0, surf as f32);
-                let rust_mask_f = rust_mask as f32;
-                let r = lerp(
-                    c.color_metal[0] * metal_bright,
-                    c.color_rust[0],
-                    rust_mask_f,
-                );
-                let g = lerp(
-                    c.color_metal[1] * metal_bright,
-                    c.color_rust[1],
-                    rust_mask_f,
-                );
-                let b = lerp(
-                    c.color_metal[2] * metal_bright,
-                    c.color_rust[2],
-                    rust_mask_f,
-                );
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: rust raises roughness and suppresses metallic.
-                let rough = (c.roughness as f32 + rust_mask_f * 0.4).clamp(0.0, 1.0);
-                let met = (c.metallic - rust_mask_f * 0.7 * c.metallic).clamp(0.0, 1.0);
-                roughness_buf[ai] = 255; // Occlusion = 1.0
-                roughness_buf[ai + 1] = (rough * 255.0).round() as u8;
-                roughness_buf[ai + 2] = (met * 255.0).round() as u8;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(micro_grid);
+            ws.return_grid(rust_grid);
         }
-
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
-
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+        result
     }
 }
 
-// --- helpers ----------------------------------------------------------------
+impl TextureGenerator for CorrugatedGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-#[inline]
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t.clamp(0.0, 1.0)
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
 }

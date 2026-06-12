@@ -94,6 +94,7 @@ pub mod spark;
 pub mod sprite;
 pub mod stained_glass;
 pub mod stucco;
+pub mod surface;
 pub mod thatch;
 pub mod twig;
 pub mod wainscoting;
@@ -122,6 +123,7 @@ pub use material::{
 };
 pub use noise::ToroidalNoise;
 pub use sprite::{CellRng, SpriteCell, SpriteSample, generate_atlas};
+pub use surface::{SurfaceCell, SurfaceSample, generate_surface};
 pub use twig::{TwigConfig, TwigGenerator};
 
 use bevy::prelude::*;

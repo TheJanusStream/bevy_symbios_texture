@@ -13,9 +13,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface},
 };
 
 /// Configures the appearance of a [`CobblestoneGenerator`].
@@ -82,103 +82,108 @@ impl CobblestoneGenerator {
     }
 }
 
-impl TextureGenerator for CobblestoneGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: surface grid + Voronoi layout constants.
+struct CobblestoneCell<'a> {
+    config: &'a CobblestoneConfig,
+    surf_grid: &'a [f64],
+    /// `scale` rounded and clamped ≥ 1 so the Voronoi lattice tiles.
+    scale: f64,
+    /// Gap threshold in UV distance units: stones end where the Voronoi
+    /// boundary is closer than this value.
+    gap_threshold: f64,
+    width: usize,
+}
+
+impl SurfaceCell for CobblestoneCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.width + x as usize;
+        let raw_surf = normalize(self.surf_grid[idx]);
+
+        // Grid-based toroidal Voronoi: returns F1, F2, and the integer
+        // cell coordinates of the nearest site.
+        let (f1, f2, ci, cj) = voronoi(u, v, self.scale, c.seed);
+
+        let in_gap = f2 - f1 < self.gap_threshold;
+
+        let (h_val, color) = if in_gap {
+            // ── Mud / dirt gap ────────────────────────────────────────
+            (raw_surf * 0.04, c.color_mud)
+        } else {
+            // ── Stone face ────────────────────────────────────────────
+            // Dome profile: peaks at 1.0 directly over the Voronoi
+            // site and falls toward 0.0 at the cell boundary.
+            let dome_base = (1.0 - (f1 * c.scale).powf(c.roundness)).clamp(0.0, 1.0);
+            // Blend FBM micro-detail into the height.
+            let h_val = (dome_base * (0.85 + raw_surf * 0.15)).clamp(0.0, 1.0);
+
+            // Per-stone colour jitter via cell hash.
+            let cv = cell_hash(ci, cj, c.seed.wrapping_add(99));
+            let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
+            let color = [
+                (c.color_stone[0] + jitter as f32).clamp(0.0, 1.0),
+                (c.color_stone[1] + jitter as f32 * 0.85).clamp(0.0, 1.0),
+                (c.color_stone[2] + jitter as f32 * 0.65).clamp(0.0, 1.0),
+            ];
+            (h_val, color)
+        };
+
+        // ORM: stone roughness varies with dome height (higher = smoother),
+        // mud is nearly fully rough.
+        let rough_val = if in_gap {
+            0.95
+        } else {
+            // Smoother at the crown, rougher toward the edges.
+            (0.85 - h_val as f32 * 0.20 + raw_surf as f32 * 0.10).clamp(0.60, 0.90)
+        };
+
+        SurfaceSample::matte(h_val, color, rough_val)
+    }
+}
+
+impl CobblestoneGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Toroidal FBM for stone-surface micro-detail.
-        let surf_grid = sample_grid(&self.surf_noise, width, height);
+        let mut surf_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.surf_noise, width, height, &mut surf_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
-
-        // Gap threshold in UV distance units: stones end where the Voronoi
-        // boundary is closer than this value.
         let scale = c.scale.round().max(1.0);
-        let gap_threshold = c.gap_width / scale;
+        let cell = CobblestoneCell {
+            config: c,
+            surf_grid: &surf_grid,
+            scale,
+            gap_threshold: c.gap_width / scale,
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-
-                let idx = y * w + x;
-                let raw_surf = normalize(surf_grid[idx]);
-
-                // Grid-based toroidal Voronoi: returns F1, F2, and the integer
-                // cell coordinates of the nearest site.
-                let (f1, f2, ci, cj) = voronoi(u, v, c.scale.round().max(1.0), c.seed);
-
-                let h_val;
-                let (r, g, b);
-
-                if f2 - f1 < gap_threshold {
-                    // ── Mud / dirt gap ────────────────────────────────────────
-                    h_val = raw_surf * 0.04;
-                    r = c.color_mud[0];
-                    g = c.color_mud[1];
-                    b = c.color_mud[2];
-                } else {
-                    // ── Stone face ────────────────────────────────────────────
-                    // Dome profile: peaks at 1.0 directly over the Voronoi
-                    // site and falls toward 0.0 at the cell boundary.
-                    let dome_base = (1.0 - (f1 * c.scale).powf(c.roundness)).clamp(0.0, 1.0);
-                    // Blend FBM micro-detail into the height.
-                    h_val = (dome_base * (0.85 + raw_surf * 0.15)).clamp(0.0, 1.0);
-
-                    // Per-stone colour jitter via cell hash.
-                    let cv = cell_hash(ci, cj, c.seed.wrapping_add(99));
-                    let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
-                    r = (c.color_stone[0] + jitter as f32).clamp(0.0, 1.0);
-                    g = (c.color_stone[1] + jitter as f32 * 0.85).clamp(0.0, 1.0);
-                    b = (c.color_stone[2] + jitter as f32 * 0.65).clamp(0.0, 1.0);
-                }
-
-                heights[idx] = h_val;
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                // ORM: stone roughness varies with dome height (higher = smoother),
-                // mud is nearly fully rough.
-                let rough_val = if f2 - f1 < gap_threshold {
-                    0.95
-                } else {
-                    // Smoother at the crown, rougher toward the edges.
-                    (0.85 - h_val as f32 * 0.20 + raw_surf as f32 * 0.10).clamp(0.60, 0.90)
-                };
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(surf_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for CobblestoneGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 

@@ -21,9 +21,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface},
 };
 
 /// Geometric pattern used by [`EncausticGenerator`].
@@ -106,105 +106,100 @@ impl EncausticGenerator {
     }
 }
 
-impl TextureGenerator for EncausticGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+/// Per-generation sampler: glaze grid + derived layout constants.
+struct EncausticCell<'a> {
+    config: &'a EncausticConfig,
+    glaze_grid: &'a [f64],
+    /// `scale` rounded to an integer (≥ 1) so the grid tiles exactly.
+    scale_f: f64,
+    grout_half: f64,
+    width: usize,
+}
+
+impl SurfaceCell for EncausticCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+        let idx = y as usize * self.width + x as usize;
+
+        // Cell coordinates.
+        let cell_u = u * self.scale_f;
+        let cell_v = v * self.scale_f;
+        let ci = cell_u.floor() as i64;
+        let cj = cell_v.floor() as i64;
+        // Local offset centered in [-0.5, 0.5].
+        let cx = cell_u.fract() - 0.5;
+        let cy = cell_v.fract() - 0.5;
+
+        // Glaze variation in [0, 1].
+        let glaze = normalize(self.glaze_grid[idx]);
+
+        // Classify pixel using the selected pattern.
+        let region = classify(&c.pattern, cx, cy, ci, cj, self.grout_half);
+
+        let (color, h_val, rough_val) = match region {
+            Region::TileA | Region::TileB => {
+                let base = match region {
+                    Region::TileA => &c.color_a,
+                    _ => &c.color_b,
+                };
+                let perturb = (glaze - 0.5) * c.glaze_roughness * 0.6;
+                let color = [
+                    (base[0] + perturb as f32).clamp(0.0, 1.0),
+                    (base[1] + perturb as f32).clamp(0.0, 1.0),
+                    (base[2] + perturb as f32).clamp(0.0, 1.0),
+                ];
+                (color, 0.85 + glaze * 0.15, 0.20 + glaze * 0.05)
+            }
+            Region::Grout => (c.color_grout, 0.0_f64, 0.85_f64),
+        };
+
+        // Ceramic is non-metallic; `matte` covers it.
+        SurfaceSample::matte(h_val, color, rough_val as f32)
+    }
+}
+
+impl EncausticGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Toroidal glaze FBM: low-frequency surface waviness from hand-firing.
-        let glaze_grid = sample_grid(&self.glaze_noise, width, height);
+        let mut glaze_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.glaze_noise, width, height, &mut glaze_grid);
 
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let cell = EncausticCell {
+            config: c,
+            glaze_grid: &glaze_grid,
+            scale_f: c.scale.round().max(1.0),
+            grout_half: (c.grout_width * 0.5).clamp(0.0, 0.49),
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        // Round scale to an integer so the grid tiles exactly.
-        let scale_f = c.scale.round().max(1.0);
-        let grout_half = (c.grout_width * 0.5).clamp(0.0, 0.49);
-
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
-
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-                let idx = y * w + x;
-                let ai = idx * 4;
-
-                // Cell coordinates.
-                let cell_u = u * scale_f;
-                let cell_v = v * scale_f;
-                let ci = cell_u.floor() as i64;
-                let cj = cell_v.floor() as i64;
-                // Local offset centered in [-0.5, 0.5].
-                let cx = cell_u.fract() - 0.5;
-                let cy = cell_v.fract() - 0.5;
-
-                // Glaze variation in [0, 1].
-                let glaze = normalize(glaze_grid[idx]);
-
-                // Classify pixel using the selected pattern.
-                let region = classify(&c.pattern, cx, cy, ci, cj, grout_half);
-
-                let (r, g, b, h_val, rough_val) = match region {
-                    Region::TileA => {
-                        let perturb = (glaze - 0.5) * c.glaze_roughness * 0.6;
-                        let r = (c.color_a[0] + perturb as f32).clamp(0.0, 1.0);
-                        let g = (c.color_a[1] + perturb as f32).clamp(0.0, 1.0);
-                        let b = (c.color_a[2] + perturb as f32).clamp(0.0, 1.0);
-                        let hv = 0.85 + glaze * 0.15;
-                        let rv = 0.20 + glaze * 0.05;
-                        (r, g, b, hv, rv)
-                    }
-                    Region::TileB => {
-                        let perturb = (glaze - 0.5) * c.glaze_roughness * 0.6;
-                        let r = (c.color_b[0] + perturb as f32).clamp(0.0, 1.0);
-                        let g = (c.color_b[1] + perturb as f32).clamp(0.0, 1.0);
-                        let b = (c.color_b[2] + perturb as f32).clamp(0.0, 1.0);
-                        let hv = 0.85 + glaze * 0.15;
-                        let rv = 0.20 + glaze * 0.05;
-                        (r, g, b, hv, rv)
-                    }
-                    Region::Grout => {
-                        let r = c.color_grout[0];
-                        let g = c.color_grout[1];
-                        let b = c.color_grout[2];
-                        (r, g, b, 0.0_f64, 0.85_f64)
-                    }
-                };
-
-                heights[idx] = h_val;
-
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0; // ceramic is non-metallic
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(glaze_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for EncausticGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
     }
 }
 

@@ -13,9 +13,9 @@
 use noise::{Fbm, MultiFractal, Perlin};
 
 use crate::{
-    generator::{TextureError, TextureGenerator, TextureMap, linear_to_srgb, validate_dimensions},
-    noise::{ToroidalNoise, normalize, sample_grid},
-    normal::{BoundaryMode, height_to_normal},
+    generator::{TextureError, TextureGenerator, TextureMap, Workspace, validate_dimensions},
+    noise::{ToroidalNoise, normalize, sample_grid_into},
+    surface::{SurfaceCell, SurfaceSample, generate_surface},
 };
 
 /// Configures the appearance of an [`AshlarGenerator`].
@@ -104,20 +104,23 @@ impl AshlarGenerator {
     }
 }
 
-impl TextureGenerator for AshlarGenerator {
-    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+impl AshlarGenerator {
+    fn generate_inner(
+        &self,
+        width: u32,
+        height: u32,
+        mut ws: Option<&mut Workspace>,
+    ) -> Result<TextureMap, TextureError> {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
         // Toroidal FBM for stone-face micro-detail and chisel approximation.
-        let rough_grid = sample_grid(&self.rough_noise, width, height);
+        let mut rough_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.rough_noise, width, height, &mut rough_grid);
 
         // Second FBM at higher frequency for fine chisel/crack detail.
-        let chisel_grid = sample_grid(&self.chisel_noise, width, height);
-
-        let w = width as usize;
-        let h = height as usize;
-        let n = w * h;
+        let mut chisel_grid = ws.as_deref_mut().map_or_else(Vec::new, |w| w.take_grid());
+        sample_grid_into(&self.chisel_noise, width, height, &mut chisel_grid);
 
         // ── Pre-compute row structure ─────────────────────────────────────────
         // Row heights: each varies based on a hash of the row index, then
@@ -183,141 +186,159 @@ impl TextureGenerator for AshlarGenerator {
         let mortar_gap_uv = c.mortar_size * avg_cell_size * 0.5;
         let bevel_r_uv = (c.bevel * mortar_gap_uv).max(0.0);
 
-        let mut heights = vec![0.0f64; n];
-        let mut albedo = vec![0u8; n * 4];
-        let mut roughness_buf = vec![0u8; n * 4];
+        let cell = AshlarCell {
+            config: c,
+            rough_grid: &rough_grid,
+            chisel_grid: &chisel_grid,
+            rows,
+            row_cum,
+            row_ncols,
+            col_cums,
+            mortar_gap_uv,
+            bevel_r_uv,
+            width: width as usize,
+        };
+        let result = generate_surface(width, height, c.normal_strength, ws.as_deref_mut(), &cell);
 
-        for y in 0..h {
-            let v = y as f64 / h as f64;
-
-            // Find which row this pixel belongs to.
-            let row = {
-                let idx = row_cum.partition_point(|&b| b <= v).saturating_sub(1);
-                idx.min(rows - 1)
-            };
-            let row_lo = row_cum[row];
-            let row_hi = row_cum[row + 1];
-            // Local V within this row in [0, 1].
-            let v_local = ((v - row_lo) / (row_hi - row_lo)).clamp(0.0, 1.0);
-            // Cell-centred V coordinate in [-0.5, 0.5].
-            let cy_cell = v_local - 0.5;
-            // Half-extent of the stone in V (row height in UV units).
-            let row_h_uv = row_hi - row_lo;
-
-            for x in 0..w {
-                let u = x as f64 / w as f64;
-
-                // Find which column this pixel belongs to within the current row.
-                let cum = &col_cums[row];
-                let ncols = row_ncols[row];
-                let col = {
-                    let idx = cum.partition_point(|&b| b < u).saturating_sub(1);
-                    idx.min(ncols - 1)
-                };
-                let col_lo = cum[col];
-                let col_hi = cum[col + 1];
-                // Local U within this block in [0, 1].
-                let u_local = ((u - col_lo) / (col_hi - col_lo)).clamp(0.0, 1.0);
-                // Cell-centred U coordinate in [-0.5, 0.5].
-                let cx_cell = u_local - 0.5;
-                // Half-extent of the stone in U (column width in UV units).
-                let col_w_uv = col_hi - col_lo;
-
-                // ── Rounded-box SDF ───────────────────────────────────────────
-                // The SDF is computed in *UV space*, not normalised cell space,
-                // so the mortar gap is visually uniform.  We map the centred
-                // cell-local coordinates back to UV distances.
-                let px = cx_cell * col_w_uv; // UV offset from block centre (U)
-                let py = cy_cell * row_h_uv; // UV offset from block centre (V)
-
-                // Inner half-extents (stone face, before bevel).
-                let hx = (col_w_uv * 0.5 - mortar_gap_uv - bevel_r_uv).max(0.0);
-                let hy = (row_h_uv * 0.5 - mortar_gap_uv - bevel_r_uv).max(0.0);
-
-                let dx = px.abs() - hx;
-                let dy = py.abs() - hy;
-                let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0)
-                    - bevel_r_uv;
-
-                let idx = y * w + x;
-                let raw_surf = normalize(rough_grid[idx]);
-                let raw_chisel = normalize(chisel_grid[idx]);
-
-                let h_val;
-                let (r, gr, b);
-
-                if sdf < 0.0 {
-                    // ── Inside the stone block ────────────────────────────────
-                    // Bevel ramp: rises from 0 at the border to 1 in the
-                    // interior.  Scale by the effective bevel radius, with a
-                    // small floor so the ramp has finite width even at bevel=0.
-                    let bevel_zone = (bevel_r_uv + mortar_gap_uv * 0.3 + 1e-5).max(1e-5);
-                    let edge_t = ((-sdf) / bevel_zone).clamp(0.0, 1.0);
-
-                    // Chisel darkening: strongest near block edges, fades inward.
-                    // Use the raw chisel FBM sample to break up the uniformity.
-                    let edge_proximity = (1.0 - edge_t).powi(2);
-                    let chisel_bump = raw_chisel * c.chisel_depth * edge_proximity;
-
-                    // Face micro-detail from the rough FBM.
-                    let face_bump = (raw_surf - 0.5) * c.roughness * 0.35;
-
-                    h_val = (edge_t + face_bump * edge_t - chisel_bump * 0.4).clamp(0.0, 1.0);
-
-                    // Per-block colour jitter via integer cell hash.
-                    let block_id = row as i64 * 1000 + col as i64;
-                    let cv = cell_hash(block_id, row as i64, c.seed.wrapping_add(77));
-                    let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
-                    // Chisel darkening also tints the colour.
-                    let chisel_darken = (chisel_bump * c.chisel_depth * 0.6) as f32;
-                    r = (c.color_stone[0] + jitter as f32 - chisel_darken).clamp(0.0, 1.0);
-                    gr = (c.color_stone[1] + jitter as f32 * 0.8 - chisel_darken).clamp(0.0, 1.0);
-                    b = (c.color_stone[2] + jitter as f32 * 0.6 - chisel_darken).clamp(0.0, 1.0);
-                } else {
-                    // ── Mortar joint ──────────────────────────────────────────
-                    h_val = raw_surf * c.roughness * 0.03;
-                    r = c.color_mortar[0];
-                    gr = c.color_mortar[1];
-                    b = c.color_mortar[2];
-                }
-
-                heights[idx] = h_val;
-
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(gr);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
-
-                let rough_val = if sdf < 0.0 {
-                    // Stone face: moderate roughness with FBM variation.
-                    0.50 + raw_surf as f32 * 0.30
-                } else {
-                    // Mortar: high roughness.
-                    0.92
-                };
-                roughness_buf[ai] = 255;
-                roughness_buf[ai + 1] = (rough_val * 255.0).round() as u8;
-                roughness_buf[ai + 2] = 0;
-                roughness_buf[ai + 3] = 255;
-            }
+        if let Some(ws) = ws {
+            ws.return_grid(rough_grid);
+            ws.return_grid(chisel_grid);
         }
+        result
+    }
+}
 
-        let normal = height_to_normal(
-            &heights,
-            width,
-            height,
-            c.normal_strength,
-            BoundaryMode::Wrap,
-        );
+impl TextureGenerator for AshlarGenerator {
+    fn generate(&self, width: u32, height: u32) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, None)
+    }
 
-        Ok(TextureMap {
-            albedo,
-            normal,
-            roughness: roughness_buf,
-            width,
-            height,
-        })
+    fn generate_with_workspace(
+        &self,
+        width: u32,
+        height: u32,
+        workspace: &mut Workspace,
+    ) -> Result<TextureMap, TextureError> {
+        self.generate_inner(width, height, Some(workspace))
+    }
+}
+
+/// Per-generation sampler: noise grids plus the precomputed irregular
+/// row/column layout (cumulative boundaries, per-row column counts).
+struct AshlarCell<'a> {
+    config: &'a AshlarConfig,
+    rough_grid: &'a [f64],
+    chisel_grid: &'a [f64],
+    rows: usize,
+    /// Cumulative row boundaries: `[0.0, h0, h0+h1, …, 1.0]`.
+    row_cum: Vec<f64>,
+    /// Per-row column count (base ± 1).
+    row_ncols: Vec<usize>,
+    /// Per-row cumulative column widths: `[0.0, w0, w0+w1, …, 1.0]`.
+    col_cums: Vec<Vec<f64>>,
+    mortar_gap_uv: f64,
+    bevel_r_uv: f64,
+    width: usize,
+}
+
+impl SurfaceCell for AshlarCell<'_> {
+    fn sample(&self, x: u32, y: u32, u: f64, v: f64) -> SurfaceSample {
+        let c = self.config;
+
+        // Find which row this pixel belongs to.
+        let row = {
+            let idx = self.row_cum.partition_point(|&b| b <= v).saturating_sub(1);
+            idx.min(self.rows - 1)
+        };
+        let row_lo = self.row_cum[row];
+        let row_hi = self.row_cum[row + 1];
+        // Local V within this row in [0, 1].
+        let v_local = ((v - row_lo) / (row_hi - row_lo)).clamp(0.0, 1.0);
+        // Cell-centred V coordinate in [-0.5, 0.5].
+        let cy_cell = v_local - 0.5;
+        // Half-extent of the stone in V (row height in UV units).
+        let row_h_uv = row_hi - row_lo;
+
+        // Find which column this pixel belongs to within the current row.
+        let cum = &self.col_cums[row];
+        let ncols = self.row_ncols[row];
+        let col = {
+            let idx = cum.partition_point(|&b| b < u).saturating_sub(1);
+            idx.min(ncols - 1)
+        };
+        let col_lo = cum[col];
+        let col_hi = cum[col + 1];
+        // Local U within this block in [0, 1].
+        let u_local = ((u - col_lo) / (col_hi - col_lo)).clamp(0.0, 1.0);
+        // Cell-centred U coordinate in [-0.5, 0.5].
+        let cx_cell = u_local - 0.5;
+        // Half-extent of the stone in U (column width in UV units).
+        let col_w_uv = col_hi - col_lo;
+
+        // ── Rounded-box SDF ───────────────────────────────────────────
+        // The SDF is computed in *UV space*, not normalised cell space,
+        // so the mortar gap is visually uniform.  We map the centred
+        // cell-local coordinates back to UV distances.
+        let px = cx_cell * col_w_uv; // UV offset from block centre (U)
+        let py = cy_cell * row_h_uv; // UV offset from block centre (V)
+
+        // Inner half-extents (stone face, before bevel).
+        let hx = (col_w_uv * 0.5 - self.mortar_gap_uv - self.bevel_r_uv).max(0.0);
+        let hy = (row_h_uv * 0.5 - self.mortar_gap_uv - self.bevel_r_uv).max(0.0);
+
+        let dx = px.abs() - hx;
+        let dy = py.abs() - hy;
+        let sdf = (dx.max(0.0).powi(2) + dy.max(0.0).powi(2)).sqrt() + dx.max(dy).min(0.0)
+            - self.bevel_r_uv;
+
+        let idx = y as usize * self.width + x as usize;
+        let raw_surf = normalize(self.rough_grid[idx]);
+        let raw_chisel = normalize(self.chisel_grid[idx]);
+
+        let (h_val, color) = if sdf < 0.0 {
+            // ── Inside the stone block ────────────────────────────────
+            // Bevel ramp: rises from 0 at the border to 1 in the
+            // interior.  Scale by the effective bevel radius, with a
+            // small floor so the ramp has finite width even at bevel=0.
+            let bevel_zone = (self.bevel_r_uv + self.mortar_gap_uv * 0.3 + 1e-5).max(1e-5);
+            let edge_t = ((-sdf) / bevel_zone).clamp(0.0, 1.0);
+
+            // Chisel darkening: strongest near block edges, fades inward.
+            // Use the raw chisel FBM sample to break up the uniformity.
+            let edge_proximity = (1.0 - edge_t).powi(2);
+            let chisel_bump = raw_chisel * c.chisel_depth * edge_proximity;
+
+            // Face micro-detail from the rough FBM.
+            let face_bump = (raw_surf - 0.5) * c.roughness * 0.35;
+
+            let h_val = (edge_t + face_bump * edge_t - chisel_bump * 0.4).clamp(0.0, 1.0);
+
+            // Per-block colour jitter via integer cell hash.
+            let block_id = row as i64 * 1000 + col as i64;
+            let cv = cell_hash(block_id, row as i64, c.seed.wrapping_add(77));
+            let jitter = (cv - 0.5) * 2.0 * c.cell_variance;
+            // Chisel darkening also tints the colour.
+            let chisel_darken = (chisel_bump * c.chisel_depth * 0.6) as f32;
+            let color = [
+                (c.color_stone[0] + jitter as f32 - chisel_darken).clamp(0.0, 1.0),
+                (c.color_stone[1] + jitter as f32 * 0.8 - chisel_darken).clamp(0.0, 1.0),
+                (c.color_stone[2] + jitter as f32 * 0.6 - chisel_darken).clamp(0.0, 1.0),
+            ];
+            (h_val, color)
+        } else {
+            // ── Mortar joint ──────────────────────────────────────────
+            (raw_surf * c.roughness * 0.03, c.color_mortar)
+        };
+
+        let rough_val = if sdf < 0.0 {
+            // Stone face: moderate roughness with FBM variation.
+            0.50 + raw_surf as f32 * 0.30
+        } else {
+            // Mortar: high roughness.
+            0.92
+        };
+
+        SurfaceSample::matte(h_val, color, rough_val)
     }
 }
 
