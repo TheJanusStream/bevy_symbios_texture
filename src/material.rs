@@ -29,39 +29,9 @@ use bevy::pbr::StandardMaterial;
 use bevy::prelude::{AlphaMode, Color, Handle};
 use bevy::render::render_resource::Face;
 
-use crate::ashlar::AshlarConfig;
-use crate::asphalt::AsphaltConfig;
 use crate::async_gen::PendingTexture;
-use crate::bark::BarkConfig;
-use crate::brick::BrickConfig;
 use crate::cache::{TextureCache, TextureCacheKey};
-use crate::cobblestone::CobblestoneConfig;
-use crate::concrete::ConcreteConfig;
-use crate::corrugated::CorrugatedConfig;
-use crate::encaustic::EncausticConfig;
 use crate::generator::{map_to_images, map_to_images_card};
-use crate::ground::GroundConfig;
-use crate::iron_grille::IronGrilleConfig;
-use crate::leaf::LeafConfig;
-use crate::marble::MarbleConfig;
-use crate::metal::MetalConfig;
-use crate::pavers::PaversConfig;
-use crate::petal::PetalConfig;
-use crate::plank::PlankConfig;
-use crate::puff::PuffConfig;
-use crate::ring::RingConfig;
-use crate::rock::RockConfig;
-use crate::shard::ShardConfig;
-use crate::shingle::ShingleConfig;
-use crate::snowflake::SnowflakeConfig;
-use crate::soft_disc::SoftDiscConfig;
-use crate::spark::SparkConfig;
-use crate::stained_glass::StainedGlassConfig;
-use crate::stucco::StuccoConfig;
-use crate::thatch::ThatchConfig;
-use crate::twig::TwigConfig;
-use crate::wainscoting::WainscotingConfig;
-use crate::window::WindowConfig;
 
 /// PBR rendering hints derived from a [`TextureConfig`] variant.
 ///
@@ -105,9 +75,12 @@ fn card_render_properties() -> RenderProperties {
 }
 
 /// Generates the [`TextureConfig`] enum and its supporting impls for every
-/// generator in the crate.  Each row is `(variant, module, ConfigTy, kind)`.
+/// generator in the crate.  Receives the registry rows
+/// `(Variant, module, ConfigTy, GeneratorTy, Kind)` from
+/// [`for_each_generator!`](crate::registry::for_each_generator); the
+/// generator type is unused here (the async constructors consume it).
 macro_rules! define_texture_config {
-    ($(($variant:ident, $module:ident, $config_ty:ty, $kind:ident)),* $(,)?) => {
+    ($(($variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, $kind:ident)),* $(,)?) => {
         /// Tagged union of every generator config supported by the crate, plus
         /// a [`None`](TextureConfig::None) variant for materials that do not
         /// drive a procedural texture.
@@ -199,38 +172,7 @@ fn kind_to_render_properties(kind: TextureKind) -> RenderProperties {
     }
 }
 
-define_texture_config!(
-    (Leaf, leaf, LeafConfig, Card),
-    (Twig, twig, TwigConfig, Card),
-    (Bark, bark, BarkConfig, Surface),
-    (Window, window, WindowConfig, Card),
-    (StainedGlass, stained_glass, StainedGlassConfig, Card),
-    (IronGrille, iron_grille, IronGrilleConfig, Card),
-    (Ground, ground, GroundConfig, Surface),
-    (Rock, rock, RockConfig, Surface),
-    (Brick, brick, BrickConfig, Surface),
-    (Plank, plank, PlankConfig, Surface),
-    (Shingle, shingle, ShingleConfig, Surface),
-    (Stucco, stucco, StuccoConfig, Surface),
-    (Concrete, concrete, ConcreteConfig, Surface),
-    (Metal, metal, MetalConfig, Surface),
-    (Pavers, pavers, PaversConfig, Surface),
-    (Ashlar, ashlar, AshlarConfig, Surface),
-    (Cobblestone, cobblestone, CobblestoneConfig, Surface),
-    (Thatch, thatch, ThatchConfig, Surface),
-    (Marble, marble, MarbleConfig, Surface),
-    (Corrugated, corrugated, CorrugatedConfig, Surface),
-    (Asphalt, asphalt, AsphaltConfig, Surface),
-    (Wainscoting, wainscoting, WainscotingConfig, Surface),
-    (Encaustic, encaustic, EncausticConfig, Surface),
-    (SoftDisc, soft_disc, SoftDiscConfig, Card),
-    (Spark, spark, SparkConfig, Card),
-    (Snowflake, snowflake, SnowflakeConfig, Card),
-    (Puff, puff, PuffConfig, Card),
-    (Ring, ring, RingConfig, Card),
-    (Petal, petal, PetalConfig, Card),
-    (Shard, shard, ShardConfig, Card),
-);
+crate::registry::for_each_generator!(define_texture_config);
 
 /// PBR material settings driven by a [`TextureConfig`].
 ///
@@ -445,6 +387,12 @@ pub fn patch_procedural_material_textures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::bark::BarkConfig;
+    use crate::brick::BrickConfig;
+    use crate::iron_grille::IronGrilleConfig;
+    use crate::leaf::LeafConfig;
+    use crate::stained_glass::StainedGlassConfig;
 
     /// Every variant has a distinct, non-empty label.
     #[test]

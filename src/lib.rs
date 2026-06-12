@@ -83,6 +83,7 @@ pub mod pavers;
 pub mod petal;
 pub mod plank;
 pub mod puff;
+pub(crate) mod registry;
 pub mod ring;
 pub mod rock;
 pub mod shard;

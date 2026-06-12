@@ -24,10 +24,10 @@
 //! to a config field rolls the fingerprint and therefore the
 //! [`TextureCacheKey`], so previously-cached entries become unreachable
 //! automatically.  When generator *internals* change (new noise weights, bug
-//! fixes, etc.) without a config-field change, callers should rotate the
-//! cache directory or bump [`TextureCache::manifest_version`] and act on it
-//! externally — the field is stored on the resource for application use but
-//! is not currently mixed into on-disk filenames.
+//! fixes, etc.) without a config-field change, bump
+//! [`TextureCache::manifest_version`] — [`FileStore`] mixes it into every
+//! on-disk key, so a bump rotates the persisted cache without deleting the
+//! directory.
 //!
 //! [`TextureConfig::fingerprint`]: crate::material::TextureConfig::fingerprint
 //!
@@ -145,11 +145,10 @@ pub trait TextureCacheStore: Send + Sync {
 pub struct TextureCache {
     /// Application-supplied schema version for the cached blobs.
     ///
-    /// Not currently consumed by the built-in stores — entries are keyed on
-    /// [`TextureCacheKey`] alone — but exposed so callers can rotate caches
-    /// out-of-band when generator internals change without a config-field
-    /// change (e.g. delete the cache directory when `manifest_version` differs
-    /// from the value baked into a previous build).
+    /// [`TextureCache::file`] passes it into the [`FileStore`], which mixes
+    /// it into every on-disk key — bumping the version rotates the cache
+    /// when generator internals change without a config-field change.
+    /// Memory-backed stores never outlive the process and ignore it.
     pub manifest_version: u32,
     inner: Mutex<Box<dyn TextureCacheStore>>,
 }
@@ -171,16 +170,21 @@ impl TextureCache {
     /// Convenience: file-backed cache rooted at `dir`.
     ///
     /// The directory is created if missing.  Each entry produces one
-    /// `<sip-hash-of-key>.bin` file containing a short header (see
-    /// [`FileStore`]) followed by the three RGBA8 pixel buffers concatenated.
-    /// `images: &mut Assets<Image>` is required at lookup time to upload the
-    /// blobs into Bevy's asset system.
+    /// `<sip-hash-of-manifest-and-key>.bin` file containing a short header
+    /// (see [`FileStore`]) followed by the three RGBA8 pixel buffers
+    /// concatenated.  `images: &mut Assets<Image>` is required at lookup
+    /// time to upload the blobs into Bevy's asset system.
     ///
-    /// `manifest_version` is recorded on the resource for application use; the
-    /// built-in [`FileStore`] does not currently mix it into the on-disk key.
+    /// `manifest_version` is mixed into the on-disk key (and validated
+    /// against the blob header), so bumping it rotates the cache without
+    /// deleting the directory — use it when generator internals change
+    /// without a config-field change.
     pub fn file(dir: impl Into<PathBuf>, manifest_version: u32) -> std::io::Result<Self> {
         Ok(Self::new(
-            Box::new(FileStore::new(dir.into())?),
+            Box::new(FileStore::with_manifest_version(
+                dir.into(),
+                manifest_version,
+            )?),
             manifest_version,
         ))
     }
@@ -292,7 +296,8 @@ impl TextureCacheStore for MemoryStore {
 ///
 /// ```text
 /// magic:        b"BSTX"        (4 bytes)
-/// version:      u32 LE
+/// version:      u32 LE         (FILE_FORMAT_VERSION)
+/// manifest:     u32 LE         (manifest_version the blob was written under)
 /// is_card:      u8
 /// width:        u32 LE
 /// height:       u32 LE
@@ -304,34 +309,53 @@ impl TextureCacheStore for MemoryStore {
 /// roughness:    roughness_len bytes
 /// ```
 const FILE_MAGIC: &[u8; 4] = b"BSTX";
-const FILE_FORMAT_VERSION: u32 = 1;
+const FILE_FORMAT_VERSION: u32 = 2;
 
 /// Disk-backed cache.  Each entry is a single binary blob in `dir`.
 ///
-/// The on-disk filename is `<DefaultHasher(key)>.bin` (Rust's
-/// `std::hash::DefaultHasher`, currently SipHash-1-3, applied to the entire
-/// [`TextureCacheKey`]).  Entries from older versions of this crate may be
-/// unreadable when the on-disk format version (`FILE_FORMAT_VERSION` in the
-/// blob header) changes; the loader skips entries that fail magic / version
-/// checks, so stale files are inert rather than fatal.
+/// The on-disk filename is `<DefaultHasher(manifest_version, key)>.bin`
+/// (Rust's `std::hash::DefaultHasher`, currently SipHash-1-3).  Because the
+/// `manifest_version` is mixed into the filename hash (and validated against
+/// the blob header), bumping it rotates the cache: entries written under a
+/// different manifest version become unreachable without deleting the
+/// directory.  Entries from older crate versions may be unreadable when the
+/// on-disk format version (`FILE_FORMAT_VERSION` in the blob header)
+/// changes; the loader skips entries that fail magic / version checks, so
+/// stale files are inert rather than fatal.
 pub struct FileStore {
     root: PathBuf,
+    manifest_version: u32,
 }
 
 impl FileStore {
-    /// Open or create a file-backed store rooted at `root`.
+    /// Open or create a file-backed store rooted at `root` with
+    /// `manifest_version = 0`.
     ///
     /// The directory is created if it does not exist; any I/O error is
     /// returned unchanged so callers can decide whether to fall back to an
     /// in-memory store or abort startup.
     pub fn new(root: PathBuf) -> std::io::Result<Self> {
+        Self::with_manifest_version(root, 0)
+    }
+
+    /// Open or create a file-backed store rooted at `root`, keyed under
+    /// `manifest_version`.
+    ///
+    /// Entries written under one manifest version are invisible to stores
+    /// opened with another — bump the version when generator internals
+    /// change without a config-field change.
+    pub fn with_manifest_version(root: PathBuf, manifest_version: u32) -> std::io::Result<Self> {
         fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            manifest_version,
+        })
     }
 
     fn path_for(&self, key: &TextureCacheKey) -> PathBuf {
         use std::hash::{DefaultHasher, Hash, Hasher};
         let mut h = DefaultHasher::new();
+        self.manifest_version.hash(&mut h);
         key.hash(&mut h);
         self.root.join(format!("{:016x}.bin", h.finish()))
     }
@@ -345,6 +369,7 @@ impl FileStore {
             let mut file = fs::File::create(&path)?;
             file.write_all(FILE_MAGIC)?;
             file.write_all(&FILE_FORMAT_VERSION.to_le_bytes())?;
+            file.write_all(&self.manifest_version.to_le_bytes())?;
             file.write_all(&[is_card as u8])?;
             file.write_all(&map.width.to_le_bytes())?;
             file.write_all(&map.height.to_le_bytes())?;
@@ -369,7 +394,7 @@ impl TextureCacheStore for FileStore {
     ) -> Option<Arc<GeneratedHandles>> {
         let path = self.path_for(key);
         let mut file = fs::File::open(&path).ok()?;
-        let mut header = [0u8; 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4];
+        let mut header = [0u8; 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4];
         file.read_exact(&mut header).ok()?;
         if &header[0..4] != FILE_MAGIC {
             return None;
@@ -378,12 +403,19 @@ impl TextureCacheStore for FileStore {
         if version != FILE_FORMAT_VERSION {
             return None;
         }
-        let is_card = header[8] != 0;
-        let width = u32::from_le_bytes(header[9..13].try_into().unwrap());
-        let height = u32::from_le_bytes(header[13..17].try_into().unwrap());
-        let albedo_len = u32::from_le_bytes(header[17..21].try_into().unwrap()) as usize;
-        let normal_len = u32::from_le_bytes(header[21..25].try_into().unwrap()) as usize;
-        let roughness_len = u32::from_le_bytes(header[25..29].try_into().unwrap()) as usize;
+        // The filename hash already encodes the manifest version; validating
+        // the header copy too guards against hash collisions and hand-moved
+        // files.
+        let manifest = u32::from_le_bytes(header[8..12].try_into().unwrap());
+        if manifest != self.manifest_version {
+            return None;
+        }
+        let is_card = header[12] != 0;
+        let width = u32::from_le_bytes(header[13..17].try_into().unwrap());
+        let height = u32::from_le_bytes(header[17..21].try_into().unwrap());
+        let albedo_len = u32::from_le_bytes(header[21..25].try_into().unwrap()) as usize;
+        let normal_len = u32::from_le_bytes(header[25..29].try_into().unwrap()) as usize;
+        let roughness_len = u32::from_le_bytes(header[29..33].try_into().unwrap()) as usize;
 
         let mut albedo = vec![0u8; albedo_len];
         let mut normal = vec![0u8; normal_len];
@@ -514,6 +546,33 @@ mod tests {
         let img = images.get(&handles.albedo).expect("albedo uploaded");
         assert_eq!(img.texture_descriptor.size.width, 4);
         assert_eq!(img.texture_descriptor.size.height, 4);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn manifest_version_rotates_file_cache() {
+        let dir = scratch_dir("manifest");
+        let k = key("Bark", 21);
+        let mut images = Assets::<Image>::default();
+
+        let mut v0 = FileStore::with_manifest_version(dir.clone(), 0).expect("create v0");
+        v0.put_pixels(&k, &tiny_map(2, 2), false);
+        assert!(v0.get(&k, &mut images).is_some(), "v0 sees its own entry");
+
+        // A store opened under a different manifest version must miss.
+        let mut v1 = FileStore::with_manifest_version(dir.clone(), 1).expect("open v1");
+        assert!(
+            v1.get(&k, &mut images).is_none(),
+            "bumped manifest version must rotate the cache"
+        );
+
+        // Reopening under the original version still hits.
+        let mut v0_again = FileStore::with_manifest_version(dir.clone(), 0).expect("reopen v0");
+        assert!(
+            v0_again.get(&k, &mut images).is_some(),
+            "original manifest version must still reach its entry"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

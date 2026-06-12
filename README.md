@@ -161,10 +161,10 @@ app.insert_resource(TextureCache::memory(DEFAULT_MEMORY_CACHE_ENTRIES));
 Cache hits return previously-uploaded `Handle<Image>` clones synchronously
 and skip the rayon dispatch entirely.  Cache keys derive from a fingerprint
 of the config struct, so any field change automatically invalidates the
-prior entry.  `manifest_version` is stored on the resource for application
-use (e.g. as a sentinel to rotate the cache directory when generator
-internals change without a config-field change); the built-in `FileStore`
-does not currently mix it into the on-disk filename.
+prior entry.  `manifest_version` is mixed into every `FileStore` on-disk
+key, so bumping it rotates the persisted cache without deleting the
+directory — use it when generator internals change without a config-field
+change.
 
 The library ships two built-in stores — `MemoryStore` (bounded, FIFO
 eviction, default) and `FileStore` (binary blobs on disk) — and exposes the

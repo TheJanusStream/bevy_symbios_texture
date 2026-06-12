@@ -155,41 +155,8 @@ use bevy::{
     image::Image,
 };
 
-use crate::{
-    ashlar::{AshlarConfig, AshlarGenerator},
-    asphalt::{AsphaltConfig, AsphaltGenerator},
-    bark::{BarkConfig, BarkGenerator},
-    brick::{BrickConfig, BrickGenerator},
-    cobblestone::{CobblestoneConfig, CobblestoneGenerator},
-    concrete::{ConcreteConfig, ConcreteGenerator},
-    corrugated::{CorrugatedConfig, CorrugatedGenerator},
-    encaustic::{EncausticConfig, EncausticGenerator},
-    generator::{
-        GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images,
-        map_to_images_card,
-    },
-    ground::{GroundConfig, GroundGenerator},
-    iron_grille::{IronGrilleConfig, IronGrilleGenerator},
-    leaf::{LeafConfig, LeafGenerator},
-    marble::{MarbleConfig, MarbleGenerator},
-    metal::{MetalConfig, MetalGenerator},
-    pavers::{PaversConfig, PaversGenerator},
-    petal::{PetalConfig, PetalGenerator},
-    plank::{PlankConfig, PlankGenerator},
-    puff::{PuffConfig, PuffGenerator},
-    ring::{RingConfig, RingGenerator},
-    rock::{RockConfig, RockGenerator},
-    shard::{ShardConfig, ShardGenerator},
-    shingle::{ShingleConfig, ShingleGenerator},
-    snowflake::{SnowflakeConfig, SnowflakeGenerator},
-    soft_disc::{SoftDiscConfig, SoftDiscGenerator},
-    spark::{SparkConfig, SparkGenerator},
-    stained_glass::{StainedGlassConfig, StainedGlassGenerator},
-    stucco::{StuccoConfig, StuccoGenerator},
-    thatch::{ThatchConfig, ThatchGenerator},
-    twig::{TwigConfig, TwigGenerator},
-    wainscoting::{WainscotingConfig, WainscotingGenerator},
-    window::{WindowConfig, WindowGenerator},
+use crate::generator::{
+    GeneratedHandles, TextureError, TextureGenerator, TextureMap, map_to_images, map_to_images_card,
 };
 
 /// Spawned onto an entity to request background texture generation.
@@ -297,235 +264,47 @@ where
     }
 }
 
-impl PendingTexture {
-    /// Spawn a bark texture generation thread at `width × height` texels.
-    pub fn bark(config: BarkConfig, width: u32, height: u32) -> Self {
-        let generator = BarkGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a rock texture generation thread at `width × height` texels.
-    pub fn rock(config: RockConfig, width: u32, height: u32) -> Self {
-        let generator = RockGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a ground texture generation thread at `width × height` texels.
-    pub fn ground(config: GroundConfig, width: u32, height: u32) -> Self {
-        let generator = GroundGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a leaf texture generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for foliage cards.
-    pub fn leaf(config: LeafConfig, width: u32, height: u32) -> Self {
-        let generator = LeafGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a twig texture generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for foliage cards.
-    pub fn twig(config: TwigConfig, width: u32, height: u32) -> Self {
-        let generator = TwigGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a brick-wall texture generation thread at `width × height` texels.
-    pub fn brick(config: BrickConfig, width: u32, height: u32) -> Self {
-        let generator = BrickGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a window texture generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for foliage cards.
-    pub fn window(config: WindowConfig, width: u32, height: u32) -> Self {
-        let generator = WindowGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a wood-plank / siding texture generation thread at `width × height` texels.
-    pub fn plank(config: PlankConfig, width: u32, height: u32) -> Self {
-        let generator = PlankGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a roof-shingle texture generation thread at `width × height` texels.
-    pub fn shingle(config: ShingleConfig, width: u32, height: u32) -> Self {
-        let generator = ShingleGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a stucco / render texture generation thread at `width × height` texels.
-    pub fn stucco(config: StuccoConfig, width: u32, height: u32) -> Self {
-        let generator = StuccoGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a concrete texture generation thread at `width × height` texels.
-    pub fn concrete(config: ConcreteConfig, width: u32, height: u32) -> Self {
-        let generator = ConcreteGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a metal texture generation thread at `width × height` texels.
-    pub fn metal(config: MetalConfig, width: u32, height: u32) -> Self {
-        let generator = MetalGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a pavers / tiles texture generation thread at `width × height` texels.
-    pub fn pavers(config: PaversConfig, width: u32, height: u32) -> Self {
-        let generator = PaversGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn an ashlar (cut stone masonry) texture generation thread at `width × height` texels.
-    pub fn ashlar(config: AshlarConfig, width: u32, height: u32) -> Self {
-        let generator = AshlarGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a cobblestone texture generation thread at `width × height` texels.
-    pub fn cobblestone(config: CobblestoneConfig, width: u32, height: u32) -> Self {
-        let generator = CobblestoneGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a thatch roofing texture generation thread at `width × height` texels.
-    pub fn thatch(config: ThatchConfig, width: u32, height: u32) -> Self {
-        let generator = ThatchGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a marble / granite texture generation thread at `width × height` texels.
-    pub fn marble(config: MarbleConfig, width: u32, height: u32) -> Self {
-        let generator = MarbleGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a corrugated metal texture generation thread at `width × height` texels.
-    pub fn corrugated(config: CorrugatedConfig, width: u32, height: u32) -> Self {
-        let generator = CorrugatedGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn an asphalt / tarmac texture generation thread at `width × height` texels.
-    pub fn asphalt(config: AsphaltConfig, width: u32, height: u32) -> Self {
-        let generator = AsphaltGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a wood paneling / wainscoting texture generation thread at `width × height` texels.
-    pub fn wainscoting(config: WainscotingConfig, width: u32, height: u32) -> Self {
-        let generator = WainscotingGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a stained glass texture generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
-    pub fn stained_glass(config: StainedGlassConfig, width: u32, height: u32) -> Self {
-        let generator = StainedGlassGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn an iron grille / portcullis texture generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked cards.
-    pub fn iron_grille(config: IronGrilleConfig, width: u32, height: u32) -> Self {
-        let generator = IronGrilleGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn an encaustic ceramic tile texture generation thread at `width × height` texels.
-    pub fn encaustic(config: EncausticConfig, width: u32, height: u32) -> Self {
-        let generator = EncausticGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), false)
-    }
-
-    /// Spawn a soft-disc sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn soft_disc(config: SoftDiscConfig, width: u32, height: u32) -> Self {
-        let generator = SoftDiscGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a spark / star sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn spark(config: SparkConfig, width: u32, height: u32) -> Self {
-        let generator = SparkGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a snowflake sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn snowflake(config: SnowflakeConfig, width: u32, height: u32) -> Self {
-        let generator = SnowflakeGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a noise-puff sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn puff(config: PuffConfig, width: u32, height: u32) -> Self {
-        let generator = PuffGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a ring sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn ring(config: RingConfig, width: u32, height: u32) -> Self {
-        let generator = RingGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a petal sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn petal(config: PetalConfig, width: u32, height: u32) -> Self {
-        let generator = PetalGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
-
-    /// Spawn a shard sprite generation thread at `width × height` texels.
-    ///
-    /// [`poll_texture_tasks`] uploads the result with
-    /// [`map_to_images_card`] automatically,
-    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
-    pub fn shard(config: ShardConfig, width: u32, height: u32) -> Self {
-        let generator = ShardGenerator::new(config);
-        spawn_task(move || generator.generate(width, height), true)
-    }
+/// Generates one [`PendingTexture`] constructor per registry row (see
+/// [`crate::registry`] for the table and the add-a-generator checklist).
+/// Surface rows upload via [`map_to_images`] (repeat sampler); Card rows
+/// set `is_card` so the polling systems use [`map_to_images_card`]
+/// (clamp-to-edge sampler).
+macro_rules! define_pending_constructors {
+    ($(($variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, $kind:ident)),* $(,)?) => {
+        impl PendingTexture {
+            $(define_pending_constructors!(@one $variant, $module, $config_ty, $generator_ty, $kind);)*
+        }
+    };
+    (@one $variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, Surface) => {
+        #[doc = concat!(
+            "Spawn a ", stringify!($variant),
+            " surface-texture generation task at `width \u{d7} height` texels.",
+        )]
+        ///
+        /// [`poll_texture_tasks`] uploads the result with [`map_to_images`],
+        /// giving a repeat-wrapping sampler suitable for tileable surfaces.
+        pub fn $module(config: $config_ty, width: u32, height: u32) -> Self {
+            let generator = <$generator_ty>::new(config);
+            spawn_task(move || generator.generate(width, height), false)
+        }
+    };
+    (@one $variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, Card) => {
+        #[doc = concat!(
+            "Spawn a ", stringify!($variant),
+            " card-texture generation task at `width \u{d7} height` texels.",
+        )]
+        ///
+        /// [`poll_texture_tasks`] uploads the result with
+        /// [`map_to_images_card`] automatically, giving a clamp-to-edge
+        /// sampler suitable for alpha-masked cards and sprite atlases.
+        pub fn $module(config: $config_ty, width: u32, height: u32) -> Self {
+            let generator = <$generator_ty>::new(config);
+            spawn_task(move || generator.generate(width, height), true)
+        }
+    };
 }
+
+crate::registry::for_each_generator!(define_pending_constructors);
 
 /// Added to the entity by [`poll_texture_tasks`] when generation is complete.
 #[derive(Component)]
@@ -579,7 +358,7 @@ pub fn poll_texture_tasks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bark::BarkConfig;
+    use crate::bark::{BarkConfig, BarkGenerator};
 
     /// Auto thread count picks at least one thread regardless of host parallelism.
     #[test]
