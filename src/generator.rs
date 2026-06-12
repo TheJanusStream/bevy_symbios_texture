@@ -2,6 +2,8 @@
 
 use std::sync::OnceLock;
 
+use rayon::prelude::*;
+
 use bevy::{
     asset::{Assets, RenderAssetUsages},
     image::{Image, ImageAddressMode, ImageSampler, ImageSamplerDescriptor},
@@ -379,41 +381,47 @@ fn generate_mipmaps(
 
         data.resize(next_offset + next_width * next_height * 4, 0);
 
-        for y in 0..next_height {
-            for x in 0..next_width {
-                let dst_idx = next_offset + (y * next_width + x) * 4;
-                let sx = x * 2;
-                let sy = y * 2;
+        // The freshly-appended level is disjoint from its source level, so
+        // split the buffer and fill the new level's rows in parallel on the
+        // ambient rayon pool.  Byte-identical to serial filling.
+        let (prev_all, next_level) = data.split_at_mut(next_offset);
+        let prev_level = &prev_all[prev_offset..];
 
-                let mut pixels = [[0u8; 4]; 4];
-                let mut count = 0usize;
+        next_level
+            .par_chunks_mut(next_width * 4)
+            .enumerate()
+            .for_each(|(y, row)| {
+                for x in 0..next_width {
+                    let sx = x * 2;
+                    let sy = y * 2;
 
-                for dy in 0..2usize {
-                    if sy + dy >= current_height {
-                        continue;
-                    }
-                    for dx in 0..2usize {
-                        if sx + dx >= current_width {
+                    let mut pixels = [[0u8; 4]; 4];
+                    let mut count = 0usize;
+
+                    for dy in 0..2usize {
+                        if sy + dy >= current_height {
                             continue;
                         }
-                        let src_idx = prev_offset + ((sy + dy) * current_width + (sx + dx)) * 4;
-                        pixels[count] = [
-                            data[src_idx],
-                            data[src_idx + 1],
-                            data[src_idx + 2],
-                            data[src_idx + 3],
-                        ];
-                        count += 1;
+                        for dx in 0..2usize {
+                            if sx + dx >= current_width {
+                                continue;
+                            }
+                            let src_idx = ((sy + dy) * current_width + (sx + dx)) * 4;
+                            pixels[count] = [
+                                prev_level[src_idx],
+                                prev_level[src_idx + 1],
+                                prev_level[src_idx + 2],
+                                prev_level[src_idx + 3],
+                            ];
+                            count += 1;
+                        }
                     }
-                }
 
-                let avg = average_block(&pixels[..count], mode);
-                data[dst_idx] = avg[0];
-                data[dst_idx + 1] = avg[1];
-                data[dst_idx + 2] = avg[2];
-                data[dst_idx + 3] = avg[3];
-            }
-        }
+                    let avg = average_block(&pixels[..count], mode);
+                    let dst = x * 4;
+                    row[dst..dst + 4].copy_from_slice(&avg);
+                }
+            });
 
         prev_offset = next_offset;
         current_width = next_width;

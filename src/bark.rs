@@ -17,6 +17,7 @@ use std::f64::consts::TAU;
 
 use noise::core::worley::ReturnType;
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin, Worley};
+use rayon::prelude::*;
 
 use crate::{
     generator::{
@@ -132,10 +133,6 @@ impl BarkGenerator {
         validate_dimensions(width, height)?;
         let c = &self.config;
 
-        // Worley noise for rhytidome plates — constructed here because Worley
-        // contains an Rc and is not Send, so it cannot be stored on the struct.
-        let worley = Worley::new(c.seed.wrapping_add(300)).set_return_type(ReturnType::Distance);
-
         let w = width as usize;
         let h = height as usize;
         let n = w * h;
@@ -179,66 +176,79 @@ impl BarkGenerator {
         let mut albedo = vec![0u8; n * 4];
         let mut roughness = vec![0u8; n * 4];
 
-        for y in 0..h {
-            let nz = row_cos[y];
-            let nw = row_sin[y];
-            let v = y as f64 / h as f64;
+        heights
+            .par_chunks_mut(w)
+            .zip(albedo.par_chunks_mut(w * 4))
+            .zip(roughness.par_chunks_mut(w * 4))
+            .enumerate()
+            .for_each(|(y, ((height_row, albedo_row), orm_row))| {
+                // Worley noise for the rhytidome plates.  `noise::Worley`
+                // holds an `Rc` and is `!Sync`, so each row constructs its
+                // own instance — deterministic from the seed and only a few
+                // microseconds each, which vanishes against the per-row FBM
+                // cost.
+                let worley =
+                    Worley::new(c.seed.wrapping_add(300)).set_return_type(ReturnType::Distance);
 
-            let f_nz = f_row_cos[y];
-            let f_nw = f_row_sin[y];
+                let nz = row_cos[y];
+                let nw = row_sin[y];
+                let v = y as f64 / h as f64;
 
-            for x in 0..w {
-                let nx = col_cos[x];
-                let ny = col_sin[x];
-                let u = x as f64 / w as f64;
+                let f_nz = f_row_cos[y];
+                let f_nw = f_row_sin[y];
 
-                // Compute warp offsets using precomputed torus coordinates.
-                let du = self.warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
-                let dv = self.warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
+                for (x, height_slot) in height_row.iter_mut().enumerate() {
+                    let nx = col_cos[x];
+                    let ny = col_sin[x];
+                    let u = x as f64 / w as f64;
 
-                // Sample the precomputed base grid at the warped UV coordinates.
-                // Bilinear interpolation wraps toroidally — no trig per pixel.
-                let raw = bilinear_sample_torus(&base_grid, w, h, u + du, v + dv);
-                let t = normalize(raw); // [0, 1]
+                    // Compute warp offsets using precomputed torus coordinates.
+                    let du = self.warp_u_noise.get_precomputed(nx, ny, nz, nw) * c.warp_u;
+                    let dv = self.warp_v_noise.get_precomputed(nx, ny, nz, nw) * c.warp_v;
 
-                // --- Worley rhytidome plates ---
-                // Sample anisotropic Worley on a 4D torus: U-axis uses high
-                // frequency (narrow plates), V-axis uses low frequency (tall plates).
-                let f_nx = f_col_cos[x];
-                let f_ny = f_col_sin[x];
-                let furrow_raw = worley.get([f_nx, f_ny, f_nz, f_nw]);
-                // Invert: boundaries (furrow_raw ≈ 1) → 0 (deep crack);
-                //         centres  (furrow_raw ≈ -1) → 1 (raised plate).
-                let furrow_norm = (0.5 - furrow_raw * 0.5).clamp(0.0, 1.0);
-                // powf < 1 widens the plateau and keeps cracks narrow and sharp.
-                let plate_height = furrow_norm.powf(c.furrow_shape);
+                    // Sample the precomputed base grid at the warped UV coordinates.
+                    // Bilinear interpolation wraps toroidally — no trig per pixel.
+                    let raw = bilinear_sample_torus(&base_grid, w, h, u + du, v + dv);
+                    let t = normalize(raw); // [0, 1]
 
-                // Blend fibrous FBM micro-detail with macro rhytidome plates.
-                let t_final = t * (1.0 - c.furrow_multiplier) + plate_height * c.furrow_multiplier;
+                    // --- Worley rhytidome plates ---
+                    // Sample anisotropic Worley on a 4D torus: U-axis uses high
+                    // frequency (narrow plates), V-axis uses low frequency (tall plates).
+                    let f_nx = f_col_cos[x];
+                    let f_ny = f_col_sin[x];
+                    let furrow_raw = worley.get([f_nx, f_ny, f_nz, f_nw]);
+                    // Invert: boundaries (furrow_raw ≈ 1) → 0 (deep crack);
+                    //         centres  (furrow_raw ≈ -1) → 1 (raised plate).
+                    let furrow_norm = (0.5 - furrow_raw * 0.5).clamp(0.0, 1.0);
+                    // powf < 1 widens the plateau and keeps cracks narrow and sharp.
+                    let plate_height = furrow_norm.powf(c.furrow_shape);
 
-                let idx = y * w + x;
-                heights[idx] = t_final;
+                    // Blend fibrous FBM micro-detail with macro rhytidome plates.
+                    let t_final =
+                        t * (1.0 - c.furrow_multiplier) + plate_height * c.furrow_multiplier;
 
-                // Colour: lerp between dark and light by height value.
-                let r = lerp(c.color_dark[0], c.color_light[0], t as f32);
-                let g = lerp(c.color_dark[1], c.color_light[1], t as f32);
-                let b = lerp(c.color_dark[2], c.color_light[2], t as f32);
+                    *height_slot = t_final;
 
-                let ai = idx * 4;
-                albedo[ai] = linear_to_srgb(r);
-                albedo[ai + 1] = linear_to_srgb(g);
-                albedo[ai + 2] = linear_to_srgb(b);
-                albedo[ai + 3] = 255;
+                    // Colour: lerp between dark and light by height value.
+                    let r = lerp(c.color_dark[0], c.color_light[0], t as f32);
+                    let g = lerp(c.color_dark[1], c.color_light[1], t as f32);
+                    let b = lerp(c.color_dark[2], c.color_light[2], t as f32);
 
-                // Roughness: grooves (dark, low t) are rougher.
-                // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
-                let rough = 0.6 + (1.0 - t as f32) * 0.35;
-                roughness[ai] = 255; // Occlusion = 1.0 (no shadowing)
-                roughness[ai + 1] = (rough * 255.0).round() as u8;
-                roughness[ai + 2] = 0; // Metallic = 0.0
-                roughness[ai + 3] = 255;
-            }
-        }
+                    let ai = x * 4;
+                    albedo_row[ai] = linear_to_srgb(r);
+                    albedo_row[ai + 1] = linear_to_srgb(g);
+                    albedo_row[ai + 2] = linear_to_srgb(b);
+                    albedo_row[ai + 3] = 255;
+
+                    // Roughness: grooves (dark, low t) are rougher.
+                    // Packed as ORM: R=Occlusion(1.0), G=Roughness, B=Metallic(0.0).
+                    let rough = 0.6 + (1.0 - t as f32) * 0.35;
+                    orm_row[ai] = 255; // Occlusion = 1.0 (no shadowing)
+                    orm_row[ai + 1] = (rough * 255.0).round() as u8;
+                    orm_row[ai + 2] = 0; // Metallic = 0.0
+                    orm_row[ai + 3] = 255;
+                }
+            });
 
         // Return grid buffer to the workspace for reuse.
         if let Some(ws) = ws {

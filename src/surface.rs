@@ -23,6 +23,8 @@
 //! index a precomputed [`sample_grid_into`](crate::noise::sample_grid_into)
 //! buffer and cells that evaluate analytically agree on coordinates.
 
+use rayon::prelude::*;
+
 use crate::{
     generator::{TextureError, TextureMap, Workspace, linear_to_srgb, validate_dimensions},
     normal::{BoundaryMode, height_to_normal},
@@ -88,11 +90,21 @@ pub trait SurfaceCell {
 ///    toroidal ([`BoundaryMode::Wrap`]) neighbours, so normals tile
 ///    seamlessly alongside the colour data.
 ///
+/// Rows are sampled in parallel — `cell` must be `Sync`.  Work runs on the
+/// ambient rayon pool: async generation tasks already execute on the
+/// crate's private pool, so nested row-parallelism work-steals across that
+/// pool's threads and [`AsyncTextureConfig::pool_threads`] remains the
+/// effective CPU cap; direct synchronous calls parallelise on the caller's
+/// pool (usually the global one).  Output is byte-identical to serial
+/// evaluation — every sample is a pure function of its coordinates.
+///
 /// `workspace` (optional) pools the height-field buffer across calls; pass
 /// the same [`Workspace`] from
 /// [`generate_with_workspace`](crate::generator::TextureGenerator::generate_with_workspace)
 /// to avoid re-allocating large grids at high resolutions.
-pub fn generate_surface<C: SurfaceCell>(
+///
+/// [`AsyncTextureConfig::pool_threads`]: crate::AsyncTextureConfig
+pub fn generate_surface<C: SurfaceCell + Sync>(
     width: u32,
     height: u32,
     normal_strength: f32,
@@ -114,27 +126,31 @@ pub fn generate_surface<C: SurfaceCell>(
     let mut albedo = vec![0u8; n * 4];
     let mut roughness = vec![0u8; n * 4];
 
-    for y in 0..h {
-        let v = y as f64 / h as f64;
-        for x in 0..w {
-            let u = x as f64 / w as f64;
-            let s = cell.sample(x as u32, y as u32, u, v);
+    heights
+        .par_chunks_mut(w)
+        .zip(albedo.par_chunks_mut(w * 4))
+        .zip(roughness.par_chunks_mut(w * 4))
+        .enumerate()
+        .for_each(|(y, ((height_row, albedo_row), orm_row))| {
+            let v = y as f64 / h as f64;
+            for (x, height_slot) in height_row.iter_mut().enumerate() {
+                let u = x as f64 / w as f64;
+                let s = cell.sample(x as u32, y as u32, u, v);
 
-            let idx = y * w + x;
-            heights[idx] = s.height;
+                *height_slot = s.height;
 
-            let ai = idx * 4;
-            albedo[ai] = linear_to_srgb(s.color[0]);
-            albedo[ai + 1] = linear_to_srgb(s.color[1]);
-            albedo[ai + 2] = linear_to_srgb(s.color[2]);
-            albedo[ai + 3] = 255;
+                let ai = x * 4;
+                albedo_row[ai] = linear_to_srgb(s.color[0]);
+                albedo_row[ai + 1] = linear_to_srgb(s.color[1]);
+                albedo_row[ai + 2] = linear_to_srgb(s.color[2]);
+                albedo_row[ai + 3] = 255;
 
-            roughness[ai] = (s.occlusion.clamp(0.0, 1.0) * 255.0).round() as u8;
-            roughness[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
-            roughness[ai + 2] = (s.metallic.clamp(0.0, 1.0) * 255.0).round() as u8;
-            roughness[ai + 3] = 255;
-        }
-    }
+                orm_row[ai] = (s.occlusion.clamp(0.0, 1.0) * 255.0).round() as u8;
+                orm_row[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
+                orm_row[ai + 2] = (s.metallic.clamp(0.0, 1.0) * 255.0).round() as u8;
+                orm_row[ai + 3] = 255;
+            }
+        });
 
     let normal = height_to_normal(&heights, width, height, normal_strength, BoundaryMode::Wrap);
 

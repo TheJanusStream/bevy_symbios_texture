@@ -10,6 +10,8 @@
 //! The encoding follows Bevy's convention: values are remapped from [-1,1]
 //! to \[0, 255\] via `((n + 1.0) * 0.5 * 255.0) as u8`.
 
+use rayon::prelude::*;
+
 /// How to handle pixel neighbours at the texture boundary.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BoundaryMode {
@@ -53,7 +55,9 @@ pub fn height_to_normal(
 
     let mut out = vec![0u8; w * h * 4];
 
-    for y in 0..h {
+    // Rows are independent (each reads only `heights`, immutably), so derive
+    // them in parallel on the ambient rayon pool.  Byte-identical to serial.
+    out.par_chunks_mut(w * 4).enumerate().for_each(|(y, row)| {
         for x in 0..w {
             let (xm, xp, ym, yp) = match boundary {
                 BoundaryMode::Wrap => ((x + w - 1) % w, (x + 1) % w, (y + h - 1) % h, (y + 1) % h),
@@ -98,13 +102,13 @@ pub fn height_to_normal(
             let ny = -dy / len;
             let nz = 1.0 / len;
 
-            let idx = (y * w + x) * 4;
-            out[idx] = encode_normal(nx);
-            out[idx + 1] = encode_normal(ny);
-            out[idx + 2] = encode_normal(nz);
-            out[idx + 3] = 255;
+            let idx = x * 4;
+            row[idx] = encode_normal(nx);
+            row[idx + 1] = encode_normal(ny);
+            row[idx + 2] = encode_normal(nz);
+            row[idx + 3] = 255;
         }
-    }
+    });
 
     out
 }
@@ -122,8 +126,10 @@ pub fn height_to_normal(
 /// pixel away.
 pub(crate) fn dilate_heights(heights: &mut [f64], albedo: &[u8], w: usize, h: usize) {
     let mut dilated = heights.to_vec();
-    for y in 0..h {
-        for x in 0..w {
+    // Each output row reads only the immutable source buffers (`heights`,
+    // `albedo`), so rows dilate in parallel.  Byte-identical to serial.
+    dilated.par_chunks_mut(w).enumerate().for_each(|(y, drow)| {
+        for (x, slot) in drow.iter_mut().enumerate() {
             let idx = y * w + x;
             if albedo[idx * 4 + 3] != 0 {
                 continue; // opaque — leave unchanged
@@ -143,10 +149,10 @@ pub(crate) fn dilate_heights(heights: &mut [f64], albedo: &[u8], w: usize, h: us
                 }
             }
             if count > 0 {
-                dilated[idx] = sum / count as f64;
+                *slot = sum / count as f64;
             }
         }
-    }
+    });
     heights.copy_from_slice(&dilated);
 }
 

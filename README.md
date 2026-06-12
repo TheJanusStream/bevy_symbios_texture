@@ -65,6 +65,12 @@ concurrent tasks; configurable via `AsyncTextureConfig::pool_threads`) so the
 main thread is never stalled. On WASM, falls back to Bevy's
 `AsyncComputeTaskPool`.
 
+Within each texture, rows are generated in parallel: async tasks work-steal
+across the private pool (so `pool_threads` remains the CPU cap), while direct
+synchronous `generate()` calls parallelise on the caller's rayon pool —
+usually the global one, using every core.  Output is byte-identical to
+serial generation.
+
 If `rayon::ThreadPoolBuilder::build()` fails at first init (out-of-memory, OS
 thread limit, sandboxed environments) the library logs a warning and falls
 back to running each generator inline on the calling thread.  Texture
@@ -219,6 +225,9 @@ path on a known-good CPU baseline.
 
 If you need realtime texture editing at 60 FPS today, the alternatives are:
 
+* Rely on the row-parallel CPU path: on a modern many-core desktop the
+  heaviest generator (bark) renders a 512² map in ~20 ms, so interactive
+  editing at moderate resolutions is already feasible without the GPU port.
 * Bake the texture once via the regular CPU path and animate a material
   uniform (rust mask weight, colour blend, etc.) in the fragment shader.
 * Use `AnimatedProceduralMaterial` with a coarse `min_regen_interval` and

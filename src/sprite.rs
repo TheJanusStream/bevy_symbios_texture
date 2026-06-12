@@ -20,6 +20,8 @@
 //! Upload results with [`map_to_images_card`](crate::generator::map_to_images_card)
 //! (clamp-to-edge samplers); sprites never tile.
 
+use rayon::prelude::*;
+
 use crate::{
     generator::{TextureError, TextureMap, linear_to_srgb, validate_dimensions},
     normal::{BoundaryMode, height_to_normal},
@@ -129,6 +131,10 @@ pub fn clamp_variant_dim(n: usize) -> usize {
 /// Out-of-range atlas dimensions are clamped via [`clamp_variant_dim`]
 /// rather than rejected, mirroring how the generators treat other
 /// config-value excursions.
+///
+/// Rows are sampled in parallel — `S` must be `Sync`.  Work runs on the
+/// ambient rayon pool (the crate's private pool inside async generation
+/// tasks); output is byte-identical to serial evaluation.
 pub fn generate_atlas<S, F>(
     width: u32,
     height: u32,
@@ -138,7 +144,7 @@ pub fn generate_atlas<S, F>(
     mut make_cell: F,
 ) -> Result<TextureMap, TextureError>
 where
-    S: SpriteCell,
+    S: SpriteCell + Sync,
     F: FnMut(usize) -> S,
 {
     validate_dimensions(width, height)?;
@@ -155,36 +161,40 @@ where
     let mut albedo = vec![0u8; n * 4];
     let mut roughness = vec![0u8; n * 4];
 
-    for y in 0..h {
-        // Row-major cell lookup; the `min` guards the y == h-1 / x == w-1
-        // edge where the floating-point cell coordinate can land exactly on
-        // the next cell boundary.
-        let row = (y * rows / h).min(rows - 1);
-        let cell_v0 = row as f64 / rows as f64;
-        for x in 0..w {
-            let col = (x * cols / w).min(cols - 1);
-            let cell = &cells[row * cols + col];
+    heights
+        .par_chunks_mut(w)
+        .zip(albedo.par_chunks_mut(w * 4))
+        .zip(roughness.par_chunks_mut(w * 4))
+        .enumerate()
+        .for_each(|(y, ((height_row, albedo_row), orm_row))| {
+            // Row-major cell lookup; the `min` guards the y == h-1 / x == w-1
+            // edge where the floating-point cell coordinate can land exactly on
+            // the next cell boundary.
+            let row = (y * rows / h).min(rows - 1);
+            let cell_v0 = row as f64 / rows as f64;
+            for (x, height_slot) in height_row.iter_mut().enumerate() {
+                let col = (x * cols / w).min(cols - 1);
+                let cell = &cells[row * cols + col];
 
-            // Local cell UV of the texel centre.
-            let cell_u0 = col as f64 / cols as f64;
-            let u = ((x as f64 + 0.5) / w as f64 - cell_u0) * cols as f64;
-            let v = ((y as f64 + 0.5) / h as f64 - cell_v0) * rows as f64;
+                // Local cell UV of the texel centre.
+                let cell_u0 = col as f64 / cols as f64;
+                let u = ((x as f64 + 0.5) / w as f64 - cell_u0) * cols as f64;
+                let v = ((y as f64 + 0.5) / h as f64 - cell_v0) * rows as f64;
 
-            let s = cell.sample(u, v);
-            let idx = y * w + x;
-            let ai = idx * 4;
+                let s = cell.sample(u, v);
+                let ai = x * 4;
 
-            heights[idx] = s.height.clamp(0.0, 1.0);
-            albedo[ai] = linear_to_srgb(s.color[0]);
-            albedo[ai + 1] = linear_to_srgb(s.color[1]);
-            albedo[ai + 2] = linear_to_srgb(s.color[2]);
-            albedo[ai + 3] = (s.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-            roughness[ai] = 255;
-            roughness[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
-            roughness[ai + 2] = 0;
-            roughness[ai + 3] = 255;
-        }
-    }
+                *height_slot = s.height.clamp(0.0, 1.0);
+                albedo_row[ai] = linear_to_srgb(s.color[0]);
+                albedo_row[ai + 1] = linear_to_srgb(s.color[1]);
+                albedo_row[ai + 2] = linear_to_srgb(s.color[2]);
+                albedo_row[ai + 3] = (s.alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+                orm_row[ai] = 255;
+                orm_row[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
+                orm_row[ai + 2] = 0;
+                orm_row[ai + 3] = 255;
+            }
+        });
 
     crate::normal::dilate_heights(&mut heights, &albedo, w, h);
 

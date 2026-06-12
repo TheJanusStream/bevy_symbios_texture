@@ -17,6 +17,7 @@
 //! u=0 and u=1 always resolve to the identical 4D coordinate.
 
 use noise::NoiseFn;
+use rayon::prelude::*;
 use std::f64::consts::TAU;
 
 /// Wraps any 4-dimensional noise function and samples it on a torus, producing
@@ -76,8 +77,14 @@ impl<N: NoiseFn<f64, 4>> ToroidalNoise<N> {
 /// tables of size `W` and `H`, reducing trigonometric calls from `O(W × H)`
 /// to `O(W + H)`.
 ///
+/// Rows are evaluated in parallel on the ambient rayon pool: the crate's
+/// private texture pool when called from an async generation task, or the
+/// caller's pool (usually the global one) for direct synchronous calls.
+/// Output is byte-identical to serial evaluation — each element is a pure
+/// function of its coordinates.
+///
 /// [`Workspace`]: crate::generator::Workspace
-pub fn sample_grid_into<N: NoiseFn<f64, 4>>(
+pub fn sample_grid_into<N: NoiseFn<f64, 4> + Sync>(
     noise: &ToroidalNoise<N>,
     width: u32,
     height: u32,
@@ -102,14 +109,14 @@ pub fn sample_grid_into<N: NoiseFn<f64, 4>>(
         .collect();
 
     out.clear();
-    out.reserve(w * h);
-    for y in 0..h {
+    out.resize(w * h, 0.0);
+    out.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
         let nz = row_cos[y];
         let nw = row_sin[y];
-        for x in 0..w {
-            out.push(noise.get_precomputed(col_cos[x], col_sin[x], nz, nw));
+        for (x, slot) in row.iter_mut().enumerate() {
+            *slot = noise.get_precomputed(col_cos[x], col_sin[x], nz, nw);
         }
-    }
+    });
 }
 
 /// Convenience: iterate over a `width × height` grid and collect samples.
@@ -120,7 +127,7 @@ pub fn sample_grid_into<N: NoiseFn<f64, 4>>(
 /// prefer [`sample_grid_into`] with a [`Workspace`] to reuse allocations.
 ///
 /// [`Workspace`]: crate::generator::Workspace
-pub fn sample_grid<N: NoiseFn<f64, 4>>(
+pub fn sample_grid<N: NoiseFn<f64, 4> + Sync>(
     noise: &ToroidalNoise<N>,
     width: u32,
     height: u32,
