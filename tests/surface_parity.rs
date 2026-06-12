@@ -324,8 +324,9 @@ const GOLDEN_CONCRETE_DEFAULT: u64 = 0x0bc3_50b4_b305_85d9;
 const GOLDEN_CONCRETE_VARIED: u64 = 0x3a6c_e43c_ec5f_72a3;
 const GOLDEN_GROUND_DEFAULT: u64 = 0x277f_ed4b_5ff6_dfed;
 const GOLDEN_GROUND_VARIED: u64 = 0xe344_864b_bae8_b317;
-const GOLDEN_MARBLE_DEFAULT: u64 = 0x1225_46b4_3809_3fe6;
-const GOLDEN_MARBLE_VARIED: u64 = 0x7df9_b147_d463_f9a6;
+// Re-captured for the 0.6.0 warp_octaves change — see the bark note below.
+const GOLDEN_MARBLE_DEFAULT: u64 = 0x9586_ebd0_46a9_d68a;
+const GOLDEN_MARBLE_VARIED: u64 = 0xc401_f50f_b8e0_05ec;
 const GOLDEN_ASPHALT_DEFAULT: u64 = 0xc7b3_3ae6_5e1d_bb6e;
 const GOLDEN_ASPHALT_VARIED: u64 = 0x8fba_66ad_f373_942f;
 const GOLDEN_METAL_DEFAULT: u64 = 0xae99_2134_2632_3ede;
@@ -348,7 +349,10 @@ const GOLDEN_COBBLESTONE_DEFAULT: u64 = 0x6666_008f_1d37_58e5;
 const GOLDEN_COBBLESTONE_VARIED: u64 = 0xede8_e451_cbc8_2c5c;
 const GOLDEN_BRICK_DEFAULT: u64 = 0x1975_181d_137c_9798;
 const GOLDEN_BRICK_VARIED: u64 = 0x04dd_2e4f_0977_76fd;
-const GOLDEN_BARK_DEFAULT: u64 = 0x5642_5a11_4dcc_09ae;
-const GOLDEN_BARK_VARIED: u64 = 0x5c8a_1059_79d0_446d;
+// Bark and marble were re-captured after the intentional visual change in
+// 0.6.0: warp layers now run `warp_octaves` (default 3) instead of the full
+// base `octaves` count (accepted drift, issue #78).
+const GOLDEN_BARK_DEFAULT: u64 = 0x8433_25c5_18fe_7eb3;
+const GOLDEN_BARK_VARIED: u64 = 0x8e3c_0a26_cc91_3674;
 const GOLDEN_PLANK_DEFAULT: u64 = 0x07fe_04ba_940c_ae21;
 const GOLDEN_PLANK_VARIED: u64 = 0x94e1_59e5_9544_8098;

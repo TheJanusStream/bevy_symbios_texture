@@ -26,6 +26,12 @@ use crate::{
     surface::{SurfaceCell, SurfaceSample, generate_surface, lerp},
 };
 
+/// Serde default for [`MarbleConfig::warp_octaves`] — keeps configs saved
+/// before the field existed deserialisable.
+fn default_warp_octaves() -> usize {
+    3
+}
+
 /// Configures the appearance of a [`MarbleGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct MarbleConfig {
@@ -36,6 +42,11 @@ pub struct MarbleConfig {
     pub scale: f64,
     /// FBM octaves for the base layer. \[3, 8\]
     pub octaves: usize,
+    /// Octaves for the two warp FBM layers. \[1, 6\]  Warp output only
+    /// displaces UV lookups into the base grid, so detail beyond ~3 octaves
+    /// is visually invisible — and the warp layers dominate per-pixel cost.
+    #[serde(default = "default_warp_octaves")]
+    pub warp_octaves: usize,
     /// Domain warp strength — how much the veins meander. \[0, 1.5\]
     pub warp_strength: f64,
     /// Vein frequency: period of sin() applied to warped FBM. \[1, 8\]
@@ -58,6 +69,7 @@ impl Default for MarbleConfig {
             seed: 55,
             scale: 3.0,
             octaves: 5,
+            warp_octaves: 3,
             warp_strength: 0.6,
             vein_frequency: 3.0,
             vein_sharpness: 2.0,
@@ -91,9 +103,9 @@ impl MarbleGenerator {
     /// Builds the noise objects up front so that repeated
     /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: MarbleConfig) -> Self {
-        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.warp_octaves);
         let fbm_warp_v: Fbm<Perlin> =
-            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.octaves);
+            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.warp_octaves);
         let fbm_base: Fbm<Perlin> =
             Fbm::new(config.seed.wrapping_add(200)).set_octaves(config.octaves);
         let warp_u_noise = ToroidalNoise::new(fbm_warp_u, config.scale);
@@ -232,5 +244,26 @@ impl TextureGenerator for MarbleGenerator {
         workspace: &mut Workspace,
     ) -> Result<TextureMap, TextureError> {
         self.generate_inner(width, height, Some(workspace))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Configs serialised before `warp_octaves` existed (pre-0.6) must still
+    /// deserialise, receiving the serde default of 3.
+    #[test]
+    fn legacy_configs_without_warp_octaves_deserialize() {
+        let legacy = r#"{
+            "seed": 55, "scale": 3.0, "octaves": 5,
+            "warp_strength": 0.6, "vein_frequency": 3.0,
+            "vein_sharpness": 2.0, "roughness": 0.08,
+            "color_base": [0.92, 0.90, 0.87],
+            "color_vein": [0.42, 0.38, 0.34],
+            "normal_strength": 1.5
+        }"#;
+        let config: MarbleConfig = serde_json::from_str(legacy).expect("legacy config loads");
+        assert_eq!(config.warp_octaves, 3);
     }
 }

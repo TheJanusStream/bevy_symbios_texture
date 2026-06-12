@@ -28,6 +28,12 @@ use crate::{
     surface::lerp,
 };
 
+/// Serde default for [`BarkConfig::warp_octaves`] — keeps configs saved
+/// before the field existed deserialisable.
+fn default_warp_octaves() -> usize {
+    3
+}
+
 /// Configures the appearance of a [`BarkGenerator`].
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BarkConfig {
@@ -38,6 +44,11 @@ pub struct BarkConfig {
     pub scale: f64,
     /// Octaves for the base FBM layer.
     pub octaves: usize,
+    /// Octaves for the two warp FBM layers.  Warp output only displaces UV
+    /// lookups into the base grid, so detail beyond ~3 octaves is visually
+    /// invisible — and the warp layers dominate per-pixel cost.
+    #[serde(default = "default_warp_octaves")]
+    pub warp_octaves: usize,
     /// Horizontal warp strength (small — creates slight lateral texture).
     pub warp_u: f64,
     /// Vertical warp strength (large — creates the fibrous streaks).
@@ -66,6 +77,7 @@ impl Default for BarkConfig {
             seed: 42,
             scale: 2.0,
             octaves: 6,
+            warp_octaves: 3,
             warp_u: 0.15,
             warp_v: 0.55,
             color_light: [0.45, 0.28, 0.14],
@@ -102,9 +114,9 @@ impl BarkGenerator {
     /// Builds the noise objects up front so that repeated
     /// calls to [`generate`](TextureGenerator::generate) skip initialisation.
     pub fn new(config: BarkConfig) -> Self {
-        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.octaves);
+        let fbm_warp_u: Fbm<Perlin> = Fbm::new(config.seed).set_octaves(config.warp_octaves);
         let fbm_warp_v: Fbm<Perlin> =
-            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.octaves);
+            Fbm::new(config.seed.wrapping_add(100)).set_octaves(config.warp_octaves);
         let fbm_base: Fbm<Perlin> =
             Fbm::new(config.seed.wrapping_add(200)).set_octaves(config.octaves);
         let warp_u_noise = ToroidalNoise::new(fbm_warp_u, config.scale);
@@ -286,5 +298,29 @@ impl TextureGenerator for BarkGenerator {
         workspace: &mut Workspace,
     ) -> Result<TextureMap, TextureError> {
         self.generate_inner(width, height, Some(workspace))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Configs serialised before `warp_octaves` existed (pre-0.6) must still
+    /// deserialise, receiving the serde default of 3.
+    #[test]
+    fn legacy_configs_without_warp_octaves_deserialize() {
+        let legacy = r#"{
+            "seed": 42, "scale": 2.0, "octaves": 6,
+            "warp_u": 0.15, "warp_v": 0.55,
+            "color_light": [0.45, 0.28, 0.14],
+            "color_dark": [0.09, 0.05, 0.03],
+            "normal_strength": 3.0,
+            "furrow_multiplier": 0.78,
+            "furrow_scale_u": 2.0,
+            "furrow_scale_v": 0.48,
+            "furrow_shape": 2.0
+        }"#;
+        let config: BarkConfig = serde_json::from_str(legacy).expect("legacy config loads");
+        assert_eq!(config.warp_octaves, 3);
     }
 }

@@ -258,7 +258,8 @@ use bevy_symbios_texture::bark::BarkConfig;
 let config = BarkConfig {
     seed: 42,
     scale: 2.0,             // spatial frequency of the pattern
-    octaves: 6,             // FBM detail levels
+    octaves: 6,             // FBM detail levels (base layer)
+    warp_octaves: 3,        // FBM detail for the warp layers (3 is plenty)
     warp_u: 0.15,           // lateral warp strength
     warp_v: 0.55,           // vertical (fibre) warp strength
     color_light: [0.45, 0.28, 0.14],  // ridge colour, linear RGB
@@ -517,6 +518,7 @@ let config = MarbleConfig {
     seed: 55,
     scale: 3.0,            // overall pattern scale [1, 8]
     octaves: 5,            // FBM octaves for the base layer [3, 8]
+    warp_octaves: 3,       // FBM octaves for the warp layers [1, 6]
     warp_strength: 0.6,    // how much the veins meander [0, 1.5]
     vein_frequency: 3.0,   // period of sin() on warped FBM [1, 8]
     vein_sharpness: 2.0,   // exponent narrowing the veins [0.5, 6]
