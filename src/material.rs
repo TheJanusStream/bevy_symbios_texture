@@ -45,9 +45,16 @@ use crate::leaf::LeafConfig;
 use crate::marble::MarbleConfig;
 use crate::metal::MetalConfig;
 use crate::pavers::PaversConfig;
+use crate::petal::PetalConfig;
 use crate::plank::PlankConfig;
+use crate::puff::PuffConfig;
+use crate::ring::RingConfig;
 use crate::rock::RockConfig;
+use crate::shard::ShardConfig;
 use crate::shingle::ShingleConfig;
+use crate::snowflake::SnowflakeConfig;
+use crate::soft_disc::SoftDiscConfig;
+use crate::spark::SparkConfig;
 use crate::stained_glass::StainedGlassConfig;
 use crate::stucco::StuccoConfig;
 use crate::thatch::ThatchConfig;
@@ -215,6 +222,13 @@ define_texture_config!(
     (Asphalt, asphalt, AsphaltConfig, Surface),
     (Wainscoting, wainscoting, WainscotingConfig, Surface),
     (Encaustic, encaustic, EncausticConfig, Surface),
+    (SoftDisc, soft_disc, SoftDiscConfig, Card),
+    (Spark, spark, SparkConfig, Card),
+    (Snowflake, snowflake, SnowflakeConfig, Card),
+    (Puff, puff, PuffConfig, Card),
+    (Ring, ring, RingConfig, Card),
+    (Petal, petal, PetalConfig, Card),
+    (Shard, shard, ShardConfig, Card),
 );
 
 /// PBR material settings driven by a [`TextureConfig`].

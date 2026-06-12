@@ -39,9 +39,16 @@ use crate::{
     marble::MarbleConfig,
     metal::MetalConfig,
     pavers::PaversConfig,
+    petal::PetalConfig,
     plank::PlankConfig,
+    puff::PuffConfig,
+    ring::RingConfig,
     rock::RockConfig,
+    shard::ShardConfig,
     shingle::ShingleConfig,
+    snowflake::SnowflakeConfig,
+    soft_disc::SoftDiscConfig,
+    spark::SparkConfig,
     stained_glass::StainedGlassConfig,
     stucco::StuccoConfig,
     thatch::ThatchConfig,
@@ -572,6 +579,110 @@ impl_genotype!(EncausticConfig {
     color_b: color3(0.07),
     color_grout: color3(0.07),
     normal_strength: f32(0.5, 0.5, 6.0),
+});
+
+// Sprite-atlas generators.  `variant_rows` / `variant_cols` are evolvable
+// like any other structural field; the atlas driver clamps them to 1..=16
+// at bake time, so the genetic bounds mirror that range.
+
+impl_genotype!(SoftDiscConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    color_core: color3(0.07),
+    color_halo: color3(0.07),
+    core_radius: f64(0.05, 0.0, 0.9),
+    falloff: f64(0.5, 0.3, 8.0),
+    ellipticity: f64(0.08, 0.0, 0.6),
+    scale_jitter: f64(0.05, 0.0, 0.5),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(SparkConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    points: usize(2, 12),
+    color_core: color3(0.07),
+    color_tip: color3(0.07),
+    core_radius: f64(0.03, 0.02, 0.5),
+    arm_sharpness: f64(0.8, 0.5, 10.0),
+    falloff: f64(0.4, 0.5, 6.0),
+    length_jitter: f64(0.1, 0.0, 0.8),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(SnowflakeConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    arms: usize(3, 8),
+    color: color3(0.05),
+    core_radius: f64(0.03, 0.0, 0.4),
+    arm_width: f64(0.01, 0.01, 0.12),
+    branch_pairs: usize(0, 5),
+    branch_angle: f64(0.1, 0.3, 1.4),
+    branch_scale: f64(0.1, 0.1, 1.0),
+    softness: f64(0.005, 0.005, 0.08),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(PuffConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    color_base: color3(0.07),
+    color_shadow: color3(0.07),
+    noise_scale: f64(0.7, 1.0, 8.0),
+    octaves: usize(1, 8),
+    warp: f64(0.15, 0.0, 1.5),
+    density: f64(0.1, 0.0, 1.0),
+    edge_falloff: f64(0.5, 0.5, 6.0),
+    contrast: f64(0.3, 0.5, 4.0),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(RingConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    color: color3(0.07),
+    radius: f64(0.08, 0.1, 0.9),
+    thickness: f64(0.04, 0.01, 0.5),
+    falloff: f64(0.5, 0.5, 6.0),
+    waviness: f64(0.04, 0.0, 0.3),
+    wave_count: usize(2, 16),
+    radius_jitter: f64(0.05, 0.0, 0.4),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(PetalConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    color_base: color3(0.07),
+    color_edge: color3(0.07),
+    color_throat: color3(0.07),
+    length: f64(0.06, 0.4, 1.0),
+    width: f64(0.08, 0.15, 0.95),
+    peak: f64(0.07, 0.3, 0.9),
+    tip_notch: f64(0.03, 0.0, 0.25),
+    curl: f64(0.1, 0.0, 1.0),
+    asymmetry: f64(0.05, 0.0, 0.4),
+    normal_strength: f32(0.3, 0.0, 4.0),
+});
+
+impl_genotype!(ShardConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    color_base: color3(0.07),
+    color_edge: color3(0.07),
+    sides: usize(3, 9),
+    irregularity: f64(0.1, 0.0, 0.9),
+    edge_band: f64(0.05, 0.02, 0.5),
+    grain: f64(0.1, 0.0, 1.0),
+    normal_strength: f32(0.4, 0.0, 6.0),
 });
 
 // --- tests ------------------------------------------------------------------

@@ -31,9 +31,16 @@ use bevy_symbios_texture::{
     marble::MarbleConfig,
     metal::MetalConfig,
     pavers::PaversConfig,
+    petal::PetalConfig,
     plank::PlankConfig,
+    puff::PuffConfig,
+    ring::RingConfig,
     rock::RockConfig,
+    shard::ShardConfig,
     shingle::ShingleConfig,
+    snowflake::SnowflakeConfig,
+    soft_disc::SoftDiscConfig,
+    spark::SparkConfig,
     stained_glass::StainedGlassConfig,
     stucco::StuccoConfig,
     thatch::ThatchConfig,
@@ -43,9 +50,11 @@ use bevy_symbios_texture::{
         cobblestone_config_editor, concrete_config_editor, corrugated_config_editor,
         encaustic_config_editor, ground_config_editor, iron_grille_config_editor,
         leaf_config_editor, marble_config_editor, metal_config_editor, pavers_config_editor,
-        plank_config_editor, rock_config_editor, shingle_config_editor,
-        stained_glass_config_editor, stucco_config_editor, thatch_config_editor,
-        twig_config_editor, wainscoting_config_editor, window_config_editor,
+        petal_config_editor, plank_config_editor, puff_config_editor, ring_config_editor,
+        rock_config_editor, shard_config_editor, shingle_config_editor, snowflake_config_editor,
+        soft_disc_config_editor, spark_config_editor, stained_glass_config_editor,
+        stucco_config_editor, thatch_config_editor, twig_config_editor, wainscoting_config_editor,
+        window_config_editor,
     },
     wainscoting::WainscotingConfig,
     window::WindowConfig,
@@ -122,6 +131,13 @@ enum PanelConfig {
     StainedGlass(StainedGlassConfig),
     IronGrille(IronGrilleConfig),
     Encaustic(EncausticConfig),
+    SoftDisc(SoftDiscConfig),
+    Spark(SparkConfig),
+    Snowflake(SnowflakeConfig),
+    Puff(PuffConfig),
+    Ring(RingConfig),
+    Petal(PetalConfig),
+    Shard(ShardConfig),
 }
 
 impl PanelConfig {
@@ -150,6 +166,13 @@ impl PanelConfig {
             PanelConfig::StainedGlass(c) => c.mutate(rng, rate),
             PanelConfig::IronGrille(c) => c.mutate(rng, rate),
             PanelConfig::Encaustic(c) => c.mutate(rng, rate),
+            PanelConfig::SoftDisc(c) => c.mutate(rng, rate),
+            PanelConfig::Spark(c) => c.mutate(rng, rate),
+            PanelConfig::Snowflake(c) => c.mutate(rng, rate),
+            PanelConfig::Puff(c) => c.mutate(rng, rate),
+            PanelConfig::Ring(c) => c.mutate(rng, rate),
+            PanelConfig::Petal(c) => c.mutate(rng, rate),
+            PanelConfig::Shard(c) => c.mutate(rng, rate),
         }
     }
 
@@ -178,6 +201,13 @@ impl PanelConfig {
             PanelConfig::StainedGlass(c) => PendingTexture::stained_glass(c.clone(), width, height),
             PanelConfig::IronGrille(c) => PendingTexture::iron_grille(c.clone(), width, height),
             PanelConfig::Encaustic(c) => PendingTexture::encaustic(c.clone(), width, height),
+            PanelConfig::SoftDisc(c) => PendingTexture::soft_disc(c.clone(), width, height),
+            PanelConfig::Spark(c) => PendingTexture::spark(c.clone(), width, height),
+            PanelConfig::Snowflake(c) => PendingTexture::snowflake(c.clone(), width, height),
+            PanelConfig::Puff(c) => PendingTexture::puff(c.clone(), width, height),
+            PanelConfig::Ring(c) => PendingTexture::ring(c.clone(), width, height),
+            PanelConfig::Petal(c) => PendingTexture::petal(c.clone(), width, height),
+            PanelConfig::Shard(c) => PendingTexture::shard(c.clone(), width, height),
         }
     }
 
@@ -206,6 +236,13 @@ impl PanelConfig {
             PanelConfig::StainedGlass(_) => "Stained Glass",
             PanelConfig::IronGrille(_) => "Iron Grille",
             PanelConfig::Encaustic(_) => "Encaustic Tile",
+            PanelConfig::SoftDisc(_) => "Soft Disc",
+            PanelConfig::Spark(_) => "Spark",
+            PanelConfig::Snowflake(_) => "Snowflake",
+            PanelConfig::Puff(_) => "Puff",
+            PanelConfig::Ring(_) => "Ring",
+            PanelConfig::Petal(_) => "Petal",
+            PanelConfig::Shard(_) => "Shard",
         }
     }
 }
@@ -294,6 +331,13 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
         PanelConfig::StainedGlass(StainedGlassConfig::default()),
         PanelConfig::IronGrille(IronGrilleConfig::default()),
         PanelConfig::Encaustic(EncausticConfig::default()),
+        PanelConfig::SoftDisc(SoftDiscConfig::default()),
+        PanelConfig::Spark(SparkConfig::default()),
+        PanelConfig::Snowflake(SnowflakeConfig::default()),
+        PanelConfig::Puff(PuffConfig::default()),
+        PanelConfig::Ring(RingConfig::default()),
+        PanelConfig::Petal(PetalConfig::default()),
+        PanelConfig::Shard(ShardConfig::default()),
     ];
 
     store.textures = vec![None; configs.len()];
@@ -487,6 +531,13 @@ fn render_ui(
                 PanelConfig::StainedGlass(c) => stained_glass_config_editor(ui, c, id),
                 PanelConfig::IronGrille(c) => iron_grille_config_editor(ui, c, id),
                 PanelConfig::Encaustic(c) => encaustic_config_editor(ui, c, id),
+                PanelConfig::SoftDisc(c) => soft_disc_config_editor(ui, c, id),
+                PanelConfig::Spark(c) => spark_config_editor(ui, c, id),
+                PanelConfig::Snowflake(c) => snowflake_config_editor(ui, c, id),
+                PanelConfig::Puff(c) => puff_config_editor(ui, c, id),
+                PanelConfig::Ring(c) => ring_config_editor(ui, c, id),
+                PanelConfig::Petal(c) => petal_config_editor(ui, c, id),
+                PanelConfig::Shard(c) => shard_config_editor(ui, c, id),
             };
 
             if loading {

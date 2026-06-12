@@ -172,9 +172,16 @@ use crate::{
     marble::{MarbleConfig, MarbleGenerator},
     metal::{MetalConfig, MetalGenerator},
     pavers::{PaversConfig, PaversGenerator},
+    petal::{PetalConfig, PetalGenerator},
     plank::{PlankConfig, PlankGenerator},
+    puff::{PuffConfig, PuffGenerator},
+    ring::{RingConfig, RingGenerator},
     rock::{RockConfig, RockGenerator},
+    shard::{ShardConfig, ShardGenerator},
     shingle::{ShingleConfig, ShingleGenerator},
+    snowflake::{SnowflakeConfig, SnowflakeGenerator},
+    soft_disc::{SoftDiscConfig, SoftDiscGenerator},
+    spark::{SparkConfig, SparkGenerator},
     stained_glass::{StainedGlassConfig, StainedGlassGenerator},
     stucco::{StuccoConfig, StuccoGenerator},
     thatch::{ThatchConfig, ThatchGenerator},
@@ -444,6 +451,76 @@ impl PendingTexture {
     pub fn encaustic(config: EncausticConfig, width: u32, height: u32) -> Self {
         let generator = EncausticGenerator::new(config);
         spawn_task(move || generator.generate(width, height), false)
+    }
+
+    /// Spawn a soft-disc sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn soft_disc(config: SoftDiscConfig, width: u32, height: u32) -> Self {
+        let generator = SoftDiscGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a spark / star sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn spark(config: SparkConfig, width: u32, height: u32) -> Self {
+        let generator = SparkGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a snowflake sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn snowflake(config: SnowflakeConfig, width: u32, height: u32) -> Self {
+        let generator = SnowflakeGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a noise-puff sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn puff(config: PuffConfig, width: u32, height: u32) -> Self {
+        let generator = PuffGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a ring sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn ring(config: RingConfig, width: u32, height: u32) -> Self {
+        let generator = RingGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a petal sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn petal(config: PetalConfig, width: u32, height: u32) -> Self {
+        let generator = PetalGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
+    }
+
+    /// Spawn a shard sprite generation thread at `width × height` texels.
+    ///
+    /// [`poll_texture_tasks`] uploads the result with
+    /// [`map_to_images_card`] automatically,
+    /// giving a clamp-to-edge sampler suitable for alpha-masked sprites.
+    pub fn shard(config: ShardConfig, width: u32, height: u32) -> Self {
+        let generator = ShardGenerator::new(config);
+        spawn_task(move || generator.generate(width, height), true)
     }
 }
 

@@ -42,9 +42,16 @@ use crate::leaf::LeafConfig;
 use crate::marble::MarbleConfig;
 use crate::metal::{MetalConfig, MetalStyle};
 use crate::pavers::{PaversConfig, PaversLayout};
+use crate::petal::PetalConfig;
 use crate::plank::PlankConfig;
+use crate::puff::PuffConfig;
+use crate::ring::RingConfig;
 use crate::rock::RockConfig;
+use crate::shard::ShardConfig;
 use crate::shingle::ShingleConfig;
+use crate::snowflake::SnowflakeConfig;
+use crate::soft_disc::SoftDiscConfig;
+use crate::spark::SparkConfig;
 use crate::stained_glass::StainedGlassConfig;
 use crate::stucco::StuccoConfig;
 use crate::thatch::ThatchConfig;
@@ -531,6 +538,129 @@ impl_config_editor!(
         color("Color A", color_a),
         color("Color B", color_b),
         color("Grout Color", color_grout),
+        slider("Normal Strength", normal_strength, 0.0..=6.0),
+    }
+);
+
+// Sprite atlas editors
+
+impl_config_editor!(
+    /// Renders all [`SoftDiscConfig`] parameters inside a collapsing header.
+    fn soft_disc_config_editor, SoftDiscConfig, "Soft Disc Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Core Color", color_core),
+        color("Halo Color", color_halo),
+        slider("Core Radius", core_radius, 0.0..=0.9),
+        slider("Falloff", falloff, 0.3..=8.0),
+        slider("Ellipticity", ellipticity, 0.0..=0.6),
+        slider("Scale Jitter", scale_jitter, 0.0..=0.5),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`SparkConfig`] parameters inside a collapsing header.
+    fn spark_config_editor, SparkConfig, "Spark Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        usize("Points", points, 2..=12),
+        color("Core Color", color_core),
+        color("Tip Color", color_tip),
+        slider("Core Radius", core_radius, 0.02..=0.5),
+        slider("Arm Sharpness", arm_sharpness, 0.5..=10.0),
+        slider("Falloff", falloff, 0.5..=6.0),
+        slider("Length Jitter", length_jitter, 0.0..=0.8),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`SnowflakeConfig`] parameters inside a collapsing header.
+    fn snowflake_config_editor, SnowflakeConfig, "Snowflake Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        usize("Arms", arms, 3..=8),
+        color("Color", color),
+        slider("Core Radius", core_radius, 0.0..=0.4),
+        slider("Arm Width", arm_width, 0.01..=0.12),
+        usize("Branch Pairs", branch_pairs, 0..=5),
+        slider("Branch Angle", branch_angle, 0.3..=1.4),
+        slider("Branch Scale", branch_scale, 0.1..=1.0),
+        slider("Softness", softness, 0.005..=0.08),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`PuffConfig`] parameters inside a collapsing header.
+    fn puff_config_editor, PuffConfig, "Puff Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Base Color", color_base),
+        color("Shadow Color", color_shadow),
+        slider("Noise Scale", noise_scale, 1.0..=8.0),
+        usize("Octaves", octaves, 1..=8),
+        slider("Warp", warp, 0.0..=1.5),
+        slider("Density", density, 0.0..=1.0),
+        slider("Edge Falloff", edge_falloff, 0.5..=6.0),
+        slider("Contrast", contrast, 0.5..=4.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`RingConfig`] parameters inside a collapsing header.
+    fn ring_config_editor, RingConfig, "Ring Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Color", color),
+        slider("Radius", radius, 0.1..=0.9),
+        slider("Thickness", thickness, 0.01..=0.5),
+        slider("Falloff", falloff, 0.5..=6.0),
+        slider("Waviness", waviness, 0.0..=0.3),
+        usize("Wave Count", wave_count, 2..=16),
+        slider("Radius Jitter", radius_jitter, 0.0..=0.4),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`PetalConfig`] parameters inside a collapsing header.
+    fn petal_config_editor, PetalConfig, "Petal Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Base Color", color_base),
+        color("Edge Color", color_edge),
+        color("Throat Color", color_throat),
+        slider("Length", length, 0.4..=1.0),
+        slider("Width", width, 0.15..=0.95),
+        slider("Peak", peak, 0.3..=0.9),
+        slider("Tip Notch", tip_notch, 0.0..=0.25),
+        slider("Curl", curl, 0.0..=1.0),
+        slider("Asymmetry", asymmetry, 0.0..=0.4),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ShardConfig`] parameters inside a collapsing header.
+    fn shard_config_editor, ShardConfig, "Shard Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Base Color", color_base),
+        color("Edge Color", color_edge),
+        usize("Sides", sides, 3..=9),
+        slider("Irregularity", irregularity, 0.0..=0.9),
+        slider("Edge Band", edge_band, 0.02..=0.5),
+        slider("Grain", grain, 0.0..=1.0),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );

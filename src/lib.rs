@@ -12,6 +12,13 @@
 //! produce silhouettes with per-pixel alpha that must not tile.  Upload with
 //! [`map_to_images_card`] to get clamp-to-edge samplers.
 //!
+//! **Sprite atlases** (soft_disc, spark, snowflake, puff, ring, petal,
+//! shard): alpha-silhouette cards aimed at particle billboards.  Each can
+//! bake a `variant_rows × variant_cols` atlas where every cell renders a
+//! per-cell-seeded variant of the same config — one bake gives a particle
+//! system per-particle shape variety via random atlas frames.  Shared
+//! conventions live in [`sprite`]; upload with [`map_to_images_card`].
+//!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
 //! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness/ORM).
@@ -73,9 +80,17 @@ pub mod metal;
 pub mod noise;
 pub mod normal;
 pub mod pavers;
+pub mod petal;
 pub mod plank;
+pub mod puff;
+pub mod ring;
 pub mod rock;
+pub mod shard;
 pub mod shingle;
+pub mod snowflake;
+pub mod soft_disc;
+pub mod spark;
+pub mod sprite;
 pub mod stained_glass;
 pub mod stucco;
 pub mod thatch;
@@ -105,6 +120,7 @@ pub use material::{
     build_procedural_material_async,
 };
 pub use noise::ToroidalNoise;
+pub use sprite::{CellRng, SpriteCell, SpriteSample, generate_atlas};
 pub use twig::{TwigConfig, TwigGenerator};
 
 use bevy::prelude::*;
