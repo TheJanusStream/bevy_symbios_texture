@@ -1098,12 +1098,16 @@ A 256-entry table would be insufficient because the sRGB curve is steep
 near zero; 4096 bins keep the maximum quantisation error well below one
 count in u8.
 
-**Mipmap generation** is performed by `map_to_images` / `map_to_images_card`
-using a 2×2 box filter with type-correct averaging: sRGB values are decoded to
-linear light before averaging and re-encoded afterward (avoiding dark mipmaps),
-normal-map XYZ vectors are averaged and renormalized (avoiding zero-length
-normals in PBR shaders), and ORM values are averaged directly in linear space.
-16× anisotropic filtering is enabled on all samplers.
+**Mipmap generation** uses a 2×2 box filter with type-correct averaging: sRGB
+values are decoded to linear light before averaging and re-encoded afterward
+(avoiding dark mipmaps), normal-map XYZ vectors are averaged and renormalized
+(avoiding zero-length normals in PBR shaders), and ORM values are averaged
+directly in linear space.  Async generation tasks precompute the full chain
+on the worker thread (`TextureMap::with_mips`), so the main-thread upload in
+the polling systems is a pure buffer move; `map_to_images` /
+`map_to_images_card` compute the chain on demand for maps without one
+(synchronous callers, cache loads).  16× anisotropic filtering is enabled on
+all samplers.
 
 ## Examples
 

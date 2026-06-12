@@ -52,15 +52,65 @@ impl std::error::Error for TextureError {}
 /// Raw pixel buffers produced by a [`TextureGenerator`].
 pub struct TextureMap {
     /// RGBA8 sRGB-encoded colour (albedo) pixels, row-major.
+    ///
+    /// The base level occupies the first `width × height × 4` bytes.  When
+    /// [`mip_level_count`](TextureMap::mip_level_count) is greater than 1,
+    /// the remaining mip levels follow contiguously (see
+    /// [`with_mips`](TextureMap::with_mips)).
     pub albedo: Vec<u8>,
-    /// RGBA8 linear tangent-space normal map pixels, row-major.
+    /// RGBA8 linear tangent-space normal map pixels, row-major.  Same
+    /// base-plus-mips layout as `albedo`.
     pub normal: Vec<u8>,
-    /// RGBA8 ORM (Occlusion/Roughness/Metallic) pixels, row-major.
+    /// RGBA8 ORM (Occlusion/Roughness/Metallic) pixels, row-major.  Same
+    /// base-plus-mips layout as `albedo`.
     pub roughness: Vec<u8>,
     /// Texture width in texels.
     pub width: u32,
     /// Texture height in texels.
     pub height: u32,
+    /// Number of mip levels contained in the pixel buffers, including the
+    /// base level.  `1` means base level only (what `generate()` produces);
+    /// larger values mean [`with_mips`](TextureMap::with_mips) has appended
+    /// the full chain and upload becomes a pure move.
+    pub mip_level_count: u32,
+}
+
+impl TextureMap {
+    /// Compute the full mipmap pyramid for all three maps, appending the
+    /// levels to the pixel buffers (type-correct averaging per map — see
+    /// the module docs of [`map_to_images`]).
+    ///
+    /// The async generation tasks call this **on the worker thread** right
+    /// after `generate()`, so the main-thread upload in the polling systems
+    /// is a pure buffer move instead of a multi-megapixel box-filter pass
+    /// (a guaranteed frame hitch at 4096²).  Synchronous callers may invoke
+    /// it themselves; [`map_to_images`] computes the chain on demand when
+    /// it is absent.
+    ///
+    /// No-op if the chain is already present.
+    pub fn with_mips(mut self) -> Self {
+        if self.mip_level_count > 1 {
+            return self;
+        }
+        let (albedo, count) =
+            generate_mipmaps(self.albedo, self.width, self.height, MipmapMode::Srgb);
+        let (normal, _) =
+            generate_mipmaps(self.normal, self.width, self.height, MipmapMode::Normal);
+        let (roughness, _) =
+            generate_mipmaps(self.roughness, self.width, self.height, MipmapMode::Linear);
+        self.albedo = albedo;
+        self.normal = normal;
+        self.roughness = roughness;
+        self.mip_level_count = count;
+        self
+    }
+
+    /// The byte length of the base level (`width × height × 4`) — the
+    /// prefix of each pixel buffer that excludes any appended mip levels.
+    #[inline]
+    pub fn base_len(&self) -> usize {
+        self.width as usize * self.height as usize * 4
+    }
 }
 
 /// Handles returned after uploading a [`TextureMap`] into Bevy's asset system.
@@ -204,6 +254,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.albedo,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::Repeat,
             MipmapMode::Srgb,
@@ -212,6 +263,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.normal,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
             MipmapMode::Normal,
@@ -220,6 +272,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             map.roughness,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
             MipmapMode::Linear,
@@ -239,6 +292,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.albedo,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Srgb,
@@ -247,6 +301,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.normal,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Normal,
@@ -255,6 +310,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             map.roughness,
             map.width,
             map.height,
+            map.mip_level_count,
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Linear,
@@ -436,25 +492,30 @@ fn make_image(
     data: Vec<u8>,
     width: u32,
     height: u32,
+    mip_level_count: u32,
     format: TextureFormat,
     address_mode: ImageAddressMode,
     mipmap_mode: MipmapMode,
 ) -> Image {
-    // Pass base-level data directly — its length equals width * height * 4, which
-    // is exactly what Image::new expects.  No dummy zeroed buffer needed.
-    let mut image = Image::new(
+    // Accept a chain precomputed on the worker ([`TextureMap::with_mips`]) or
+    // compute one here for base-only buffers (synchronous callers, FileStore
+    // loads).  Either way the buffer handed to the Image carries every level.
+    let (mip_data, mip_level_count) = if mip_level_count > 1 {
+        (data, mip_level_count)
+    } else {
+        generate_mipmaps(data, width, height, mipmap_mode)
+    };
+
+    let mut image = Image::new_uninit(
         Extent3d {
             width,
             height,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        data,
         format,
         RenderAssetUsages::default(),
     );
-    let base_data = image.data.take().unwrap();
-    let (mip_data, mip_level_count) = generate_mipmaps(base_data, width, height, mipmap_mode);
     image.texture_descriptor.mip_level_count = mip_level_count;
     image.data = Some(mip_data);
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -496,4 +557,57 @@ pub(crate) fn linear_to_srgb(linear: f32) -> u8 {
         })
     });
     lut[(linear.clamp(0.0, 1.0) * (N - 1) as f32).round() as usize]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rock::{RockConfig, RockGenerator};
+
+    #[test]
+    fn with_mips_appends_full_chain_and_is_idempotent() {
+        let map = RockGenerator::new(RockConfig::default())
+            .generate(8, 8)
+            .expect("8x8 generation")
+            .with_mips();
+        // 8 → 4 → 2 → 1: four levels.
+        assert_eq!(map.mip_level_count, 4);
+        let expected = (64 + 16 + 4 + 1) * 4;
+        assert_eq!(map.albedo.len(), expected);
+        assert_eq!(map.normal.len(), expected);
+        assert_eq!(map.roughness.len(), expected);
+
+        let again = map.with_mips();
+        assert_eq!(again.mip_level_count, 4);
+        assert_eq!(again.albedo.len(), expected, "with_mips must be a no-op");
+    }
+
+    /// The worker-precomputed chain and the upload-time fallback must
+    /// produce byte-identical images.
+    #[test]
+    fn precomputed_and_on_demand_uploads_are_identical() {
+        let generator = RockGenerator::new(RockConfig::default());
+        let mut images = Assets::<Image>::default();
+
+        let on_demand = map_to_images(generator.generate(16, 16).expect("gen"), &mut images);
+        let precomputed = map_to_images(
+            generator.generate(16, 16).expect("gen").with_mips(),
+            &mut images,
+        );
+
+        for (a, b) in [
+            (&on_demand.albedo, &precomputed.albedo),
+            (&on_demand.normal, &precomputed.normal),
+            (&on_demand.roughness, &precomputed.roughness),
+        ] {
+            let ia = images.get(a).expect("on-demand image");
+            let ib = images.get(b).expect("precomputed image");
+            assert_eq!(
+                ia.texture_descriptor.mip_level_count,
+                ib.texture_descriptor.mip_level_count
+            );
+            assert_eq!(ia.texture_descriptor.size, ib.texture_descriptor.size);
+            assert_eq!(ia.data, ib.data, "upload paths must be byte-identical");
+        }
+    }
 }

@@ -409,6 +409,7 @@ impl TextureGenerator for LeafGenerator {
             roughness,
             width,
             height,
+            mip_level_count: 1,
         })
     }
 }

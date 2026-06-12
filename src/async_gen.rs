@@ -219,12 +219,15 @@ where
     match gen_pool() {
         Some(pool) => pool.spawn(move || {
             if !flag.load(Ordering::Relaxed) {
-                tx.send(f()).ok();
+                // Compute the mip chain on the worker too, so the
+                // main-thread upload in the polling systems is a pure
+                // buffer move instead of a box-filter pass.
+                tx.send(f().map(TextureMap::with_mips)).ok();
             }
         }),
         None => {
             if !flag.load(Ordering::Relaxed) {
-                tx.send(f()).ok();
+                tx.send(f().map(TextureMap::with_mips)).ok();
             }
         }
     }
@@ -252,7 +255,9 @@ where
     AsyncComputeTaskPool::get()
         .spawn(async move {
             if !flag.load(Ordering::Relaxed) {
-                tx.send(f()).ok();
+                // Compute the mip chain inside the task as on native, so the
+                // polling systems' upload stays a pure buffer move.
+                tx.send(f().map(TextureMap::with_mips)).ok();
             }
         })
         .detach(); // Detach the Bevy task; we track completion via the mpsc channel anyway

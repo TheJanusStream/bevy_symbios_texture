@@ -214,6 +214,7 @@ impl TextureGenerator for IronGrilleGenerator {
             roughness: roughness_buf,
             width,
             height,
+            mip_level_count: 1,
         })
     }
 }

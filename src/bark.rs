@@ -269,6 +269,7 @@ impl BarkGenerator {
             roughness,
             width,
             height,
+            mip_level_count: 1,
         })
     }
 }

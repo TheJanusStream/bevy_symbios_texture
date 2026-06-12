@@ -164,6 +164,7 @@ pub fn generate_surface<C: SurfaceCell + Sync>(
         roughness,
         width,
         height,
+        mip_level_count: 1,
     })
 }
 

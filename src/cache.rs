@@ -365,6 +365,14 @@ impl FileStore {
     /// fail texture generation.
     fn write_blob(&self, key: &TextureCacheKey, map: &TextureMap, is_card: bool) {
         let path = self.path_for(key);
+        // Persist base levels only: maps arriving from async tasks carry
+        // their mip chains appended ([`TextureMap::with_mips`]), but mips
+        // are cheap to regenerate on upload and would bloat every blob by a
+        // third on disk.
+        let base = map.base_len();
+        let albedo = &map.albedo[..base];
+        let normal = &map.normal[..base];
+        let roughness = &map.roughness[..base];
         if let Err(e) = (|| -> std::io::Result<()> {
             let mut file = fs::File::create(&path)?;
             file.write_all(FILE_MAGIC)?;
@@ -373,12 +381,12 @@ impl FileStore {
             file.write_all(&[is_card as u8])?;
             file.write_all(&map.width.to_le_bytes())?;
             file.write_all(&map.height.to_le_bytes())?;
-            file.write_all(&(map.albedo.len() as u32).to_le_bytes())?;
-            file.write_all(&(map.normal.len() as u32).to_le_bytes())?;
-            file.write_all(&(map.roughness.len() as u32).to_le_bytes())?;
-            file.write_all(&map.albedo)?;
-            file.write_all(&map.normal)?;
-            file.write_all(&map.roughness)?;
+            file.write_all(&(albedo.len() as u32).to_le_bytes())?;
+            file.write_all(&(normal.len() as u32).to_le_bytes())?;
+            file.write_all(&(roughness.len() as u32).to_le_bytes())?;
+            file.write_all(albedo)?;
+            file.write_all(normal)?;
+            file.write_all(roughness)?;
             Ok(())
         })() {
             bevy::log::warn!("FileStore write failed for {}: {e}", path.display());
@@ -430,6 +438,7 @@ impl TextureCacheStore for FileStore {
             roughness,
             width,
             height,
+            mip_level_count: 1,
         };
         let handles = if is_card {
             map_to_images_card(map, images)
@@ -522,6 +531,7 @@ mod tests {
             roughness: vec![200u8; n],
             width: w,
             height: h,
+            mip_level_count: 1,
         }
     }
 
@@ -573,6 +583,27 @@ mod tests {
             v0_again.get(&k, &mut images).is_some(),
             "original manifest version must still reach its entry"
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_store_persists_base_level_only_for_mipped_maps() {
+        let dir = scratch_dir("mipped");
+        let mut store = FileStore::new(dir.clone()).expect("create store dir");
+        let k = key("Bark", 31);
+
+        let map = tiny_map(4, 4).with_mips();
+        assert!(map.mip_level_count > 1, "precondition: chain present");
+        store.put_pixels(&k, &map, false);
+
+        let mut images = Assets::<Image>::default();
+        let handles = store.get(&k, &mut images).expect("hit after put_pixels");
+        let img = images.get(&handles.albedo).expect("albedo uploaded");
+        assert_eq!(img.texture_descriptor.size.width, 4);
+        // The blob stored the base level only; the chain was regenerated on
+        // upload (4 → 2 → 1 = 3 levels).
+        assert_eq!(img.texture_descriptor.mip_level_count, 3);
 
         let _ = fs::remove_dir_all(&dir);
     }
