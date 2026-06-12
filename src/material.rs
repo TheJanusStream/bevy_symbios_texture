@@ -16,7 +16,7 @@
 //! before the helper runs.  Cache hits return the previous handles without
 //! re-running the generator.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use bevy::asset::Assets;
@@ -136,20 +136,23 @@ macro_rules! define_texture_config {
 
             /// Stable per-config fingerprint suitable for cache keys.
             ///
-            /// Hashes the `Debug` representation of the variant; the output
-            /// is stable for a given config value within one process and
-            /// across re-runs of the same binary, which is the contract that
-            /// [`TextureCache`](crate::cache::TextureCache) relies on.  It is
-            /// **not** stable across compiler versions or struct-field order
-            /// changes — bump the manifest version when those change.
+            /// Structurally hashes the config through its serde
+            /// representation (every primitive as little-endian bits, floats
+            /// via `to_bits`) with a fixed FNV-1a hasher — no allocation,
+            /// and the output is stable across runs, Rust versions, and
+            /// platforms.  The fingerprint rolls only when field values
+            /// change, fields are added/removed, or the serde representation
+            /// changes; for generator-*internal* changes bump
+            /// [`TextureCache::manifest_version`](crate::cache::TextureCache::manifest_version)
+            /// instead.
             pub fn fingerprint(&self) -> u64 {
-                let mut h = DefaultHasher::new();
+                let mut h = crate::fingerprint::Fnv1a::new();
                 // Tag the kind separately so two distinct configs that
-                // happen to share a Debug body stay distinguishable.
+                // happen to share a field layout stay distinguishable.
                 self.label().hash(&mut h);
                 match self {
                     Self::None => {}
-                    $(Self::$variant(c) => format!("{c:?}").hash(&mut h)),*,
+                    $(Self::$variant(c) => crate::fingerprint::hash_value(c, &mut h)),*,
                 }
                 h.finish()
             }
@@ -187,6 +190,10 @@ pub struct MaterialSettings {
     pub emission_color: [f32; 3],
     /// Multiplier applied to `emission_color` when computing the
     /// `StandardMaterial::emissive` linear value.
+    ///
+    /// Bevy multiplies any generator-produced emissive *texture* by that
+    /// factor too, so keep this above zero (e.g. white × 1.0) for generators
+    /// that emit a glow map — at the default of 0.0 the map is invisible.
     pub emission_strength: f32,
     /// Perceptual roughness in `[0, 1]`.
     pub roughness: f32,
@@ -295,6 +302,7 @@ pub fn build_procedural_material_async(
         material.base_color_texture = Some(handles.albedo.clone());
         material.normal_map_texture = Some(handles.normal.clone());
         material.metallic_roughness_texture = Some(handles.roughness.clone());
+        material.emissive_texture = handles.emissive.clone();
         return materials.add(material);
     }
 
@@ -368,6 +376,10 @@ pub fn patch_procedural_material_textures(
                     mat.base_color_texture = Some(handles.albedo);
                     mat.normal_map_texture = Some(handles.normal);
                     mat.metallic_roughness_texture = Some(handles.roughness);
+                    // The emissive map is multiplied by the material's
+                    // `emissive` colour factor — None clears any stale map
+                    // from a previous (animated) regeneration.
+                    mat.emissive_texture = handles.emissive;
                 }
                 commands.entity(entity).despawn();
             }
@@ -412,6 +424,19 @@ mod tests {
             assert!(seen.insert(label), "duplicate label: {label}");
         }
     }
+
+    /// Cross-version stability canary: the fingerprint of a fixed config is
+    /// pinned.  If this fails, the hashing scheme or the config's field set
+    /// changed — both invalidate `FileStore` caches, so note it in the
+    /// CHANGELOG and re-pin.
+    #[test]
+    fn fingerprint_is_pinned_for_known_config() {
+        let fp = TextureConfig::Bark(BarkConfig::default()).fingerprint();
+        println!("bark default fingerprint: {fp:#018x}");
+        assert_eq!(fp, GOLDEN_BARK_FINGERPRINT);
+    }
+
+    const GOLDEN_BARK_FINGERPRINT: u64 = 0xf63c_f22d_3946_c257;
 
     /// Two equal configs hash to the same fingerprint; differing seeds produce
     /// different fingerprints.

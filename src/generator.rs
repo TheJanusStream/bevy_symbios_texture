@@ -64,6 +64,17 @@ pub struct TextureMap {
     /// RGBA8 ORM (Occlusion/Roughness/Metallic) pixels, row-major.  Same
     /// base-plus-mips layout as `albedo`.
     pub roughness: Vec<u8>,
+    /// Optional RGBA8 sRGB-encoded emissive (glow) pixels, row-major.  Same
+    /// base-plus-mips layout as `albedo`.  `None` for the non-glowing
+    /// generators (currently all of them); when present the polling systems
+    /// assign it to `StandardMaterial::emissive_texture`, where it is
+    /// multiplied by the material's `emissive` colour factor — set
+    /// [`MaterialSettings::emission_color`] /
+    /// [`emission_strength`](crate::MaterialSettings::emission_strength)
+    /// to white / 1.0 for unmodified map output.
+    ///
+    /// [`MaterialSettings::emission_color`]: crate::MaterialSettings::emission_color
+    pub emissive: Option<Vec<u8>>,
     /// Texture width in texels.
     pub width: u32,
     /// Texture height in texels.
@@ -101,6 +112,11 @@ impl TextureMap {
         self.albedo = albedo;
         self.normal = normal;
         self.roughness = roughness;
+        if let Some(emissive) = self.emissive.take() {
+            let (emissive, _) =
+                generate_mipmaps(emissive, self.width, self.height, MipmapMode::Srgb);
+            self.emissive = Some(emissive);
+        }
         self.mip_level_count = count;
         self
     }
@@ -124,6 +140,8 @@ pub struct GeneratedHandles {
     pub normal: Handle<Image>,
     /// Handle to the ORM (Occlusion/Roughness/Metallic) image.
     pub roughness: Handle<Image>,
+    /// Handle to the emissive (glow) image, when the generator produced one.
+    pub emissive: Option<Handle<Image>>,
 }
 
 /// Reusable scratch buffers for texture generation.
@@ -277,6 +295,17 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             ImageAddressMode::Repeat,
             MipmapMode::Linear,
         )),
+        emissive: map.emissive.map(|data| {
+            images.add(make_image(
+                data,
+                map.width,
+                map.height,
+                map.mip_level_count,
+                TextureFormat::Rgba8UnormSrgb,
+                ImageAddressMode::Repeat,
+                MipmapMode::Srgb,
+            ))
+        }),
     }
 }
 
@@ -315,6 +344,17 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             ImageAddressMode::ClampToEdge,
             MipmapMode::Linear,
         )),
+        emissive: map.emissive.map(|data| {
+            images.add(make_image(
+                data,
+                map.width,
+                map.height,
+                map.mip_level_count,
+                TextureFormat::Rgba8UnormSrgb,
+                ImageAddressMode::ClampToEdge,
+                MipmapMode::Srgb,
+            ))
+        }),
     }
 }
 
@@ -580,6 +620,29 @@ mod tests {
         let again = map.with_mips();
         assert_eq!(again.mip_level_count, 4);
         assert_eq!(again.albedo.len(), expected, "with_mips must be a no-op");
+    }
+
+    #[test]
+    fn emissive_maps_chain_and_upload() {
+        let mut map = RockGenerator::new(RockConfig::default())
+            .generate(8, 8)
+            .expect("8x8 generation");
+        map.emissive = Some(vec![128u8; map.base_len()]);
+
+        let map = map.with_mips();
+        let expected = (64 + 16 + 4 + 1) * 4;
+        assert_eq!(
+            map.emissive.as_ref().expect("emissive kept").len(),
+            expected,
+            "with_mips must chain the emissive map too"
+        );
+
+        let mut images = Assets::<Image>::default();
+        let handles = map_to_images(map, &mut images);
+        let handle = handles.emissive.as_ref().expect("emissive handle");
+        let img = images.get(handle).expect("emissive image");
+        assert_eq!(img.texture_descriptor.mip_level_count, 4);
+        assert_eq!(img.texture_descriptor.format, TextureFormat::Rgba8UnormSrgb);
     }
 
     /// The worker-precomputed chain and the upload-time fallback must

@@ -410,6 +410,7 @@ impl TextureGenerator for LeafGenerator {
             width,
             height,
             mip_level_count: 1,
+            emissive: None,
         })
     }
 }

@@ -304,12 +304,14 @@ impl TextureCacheStore for MemoryStore {
 /// albedo_len:   u32 LE
 /// normal_len:   u32 LE
 /// roughness_len:u32 LE
+/// emissive_len: u32 LE         (0 = no emissive map)
 /// albedo:       albedo_len bytes
 /// normal:       normal_len bytes
 /// roughness:    roughness_len bytes
+/// emissive:     emissive_len bytes
 /// ```
 const FILE_MAGIC: &[u8; 4] = b"BSTX";
-const FILE_FORMAT_VERSION: u32 = 2;
+const FILE_FORMAT_VERSION: u32 = 3;
 
 /// Disk-backed cache.  Each entry is a single binary blob in `dir`.
 ///
@@ -373,6 +375,7 @@ impl FileStore {
         let albedo = &map.albedo[..base];
         let normal = &map.normal[..base];
         let roughness = &map.roughness[..base];
+        let emissive = map.emissive.as_deref().map(|e| &e[..base]);
         if let Err(e) = (|| -> std::io::Result<()> {
             let mut file = fs::File::create(&path)?;
             file.write_all(FILE_MAGIC)?;
@@ -384,9 +387,13 @@ impl FileStore {
             file.write_all(&(albedo.len() as u32).to_le_bytes())?;
             file.write_all(&(normal.len() as u32).to_le_bytes())?;
             file.write_all(&(roughness.len() as u32).to_le_bytes())?;
+            file.write_all(&(emissive.map_or(0, |e| e.len()) as u32).to_le_bytes())?;
             file.write_all(albedo)?;
             file.write_all(normal)?;
             file.write_all(roughness)?;
+            if let Some(emissive) = emissive {
+                file.write_all(emissive)?;
+            }
             Ok(())
         })() {
             bevy::log::warn!("FileStore write failed for {}: {e}", path.display());
@@ -402,7 +409,7 @@ impl TextureCacheStore for FileStore {
     ) -> Option<Arc<GeneratedHandles>> {
         let path = self.path_for(key);
         let mut file = fs::File::open(&path).ok()?;
-        let mut header = [0u8; 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4];
+        let mut header = [0u8; 4 + 4 + 4 + 1 + 4 + 4 + 4 + 4 + 4 + 4];
         file.read_exact(&mut header).ok()?;
         if &header[0..4] != FILE_MAGIC {
             return None;
@@ -424,6 +431,7 @@ impl TextureCacheStore for FileStore {
         let albedo_len = u32::from_le_bytes(header[21..25].try_into().unwrap()) as usize;
         let normal_len = u32::from_le_bytes(header[25..29].try_into().unwrap()) as usize;
         let roughness_len = u32::from_le_bytes(header[29..33].try_into().unwrap()) as usize;
+        let emissive_len = u32::from_le_bytes(header[33..37].try_into().unwrap()) as usize;
 
         let mut albedo = vec![0u8; albedo_len];
         let mut normal = vec![0u8; normal_len];
@@ -431,11 +439,19 @@ impl TextureCacheStore for FileStore {
         file.read_exact(&mut albedo).ok()?;
         file.read_exact(&mut normal).ok()?;
         file.read_exact(&mut roughness).ok()?;
+        let emissive = if emissive_len > 0 {
+            let mut buf = vec![0u8; emissive_len];
+            file.read_exact(&mut buf).ok()?;
+            Some(buf)
+        } else {
+            None
+        };
 
         let map = TextureMap {
             albedo,
             normal,
             roughness,
+            emissive,
             width,
             height,
             mip_level_count: 1,
@@ -479,6 +495,7 @@ mod tests {
             albedo: Default::default(),
             normal: Default::default(),
             roughness: Default::default(),
+            emissive: None,
         })
     }
 
@@ -532,6 +549,7 @@ mod tests {
             width: w,
             height: h,
             mip_level_count: 1,
+            emissive: None,
         }
     }
 
@@ -603,6 +621,28 @@ mod tests {
         assert_eq!(img.texture_descriptor.size.width, 4);
         // The blob stored the base level only; the chain was regenerated on
         // upload (4 → 2 → 1 = 3 levels).
+        assert_eq!(img.texture_descriptor.mip_level_count, 3);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn file_store_round_trips_emissive_maps() {
+        let dir = scratch_dir("emissive");
+        let mut store = FileStore::new(dir.clone()).expect("create store dir");
+        let k = key("Bark", 41);
+
+        let mut map = tiny_map(4, 4);
+        map.emissive = Some(vec![222u8; map.base_len()]);
+        // Persist a mipped map: only base levels should hit the disk.
+        store.put_pixels(&k, &map.with_mips(), false);
+
+        let mut images = Assets::<Image>::default();
+        let handles = store.get(&k, &mut images).expect("hit after put_pixels");
+        let emissive = handles.emissive.as_ref().expect("emissive restored");
+        let img = images.get(emissive).expect("emissive uploaded");
+        assert_eq!(img.texture_descriptor.size.width, 4);
+        // Chain regenerated on upload from the persisted base level.
         assert_eq!(img.texture_descriptor.mip_level_count, 3);
 
         let _ = fs::remove_dir_all(&dir);

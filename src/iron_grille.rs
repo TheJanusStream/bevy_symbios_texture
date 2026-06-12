@@ -215,6 +215,7 @@ impl TextureGenerator for IronGrilleGenerator {
             width,
             height,
             mip_level_count: 1,
+            emissive: None,
         })
     }
 }

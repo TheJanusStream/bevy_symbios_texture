@@ -183,6 +183,7 @@ impl TextureGenerator for StainedGlassGenerator {
             width,
             height,
             mip_level_count: 1,
+            emissive: None,
         })
     }
 }

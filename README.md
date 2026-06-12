@@ -244,8 +244,13 @@ All tileable generators produce three seamlessly-repeating maps:
 | `albedo`   | `Rgba8UnormSrgb` | Base colour                               |
 | `normal`   | `Rgba8Unorm`     | Tangent-space normal (R=X, G=Y, B=Z)      |
 | `roughness`| `Rgba8Unorm`     | ORM: R=Occlusion, G=Roughness, B=Metallic |
+| `emissive` | `Rgba8UnormSrgb` | Optional emissive / glow map              |
 
-Upload with `map_to_images` to get repeat-wrapping samplers.
+Upload with `map_to_images` to get repeat-wrapping samplers.  When a
+generator produces an emissive map the polling systems assign it to
+`StandardMaterial::emissive_texture`, where Bevy multiplies it by the
+material's emissive colour factor — set `MaterialSettings::emission_color`
+to white and `emission_strength` to `1.0` for unmodified map output.
 
 #### Bark
 
@@ -1047,7 +1052,7 @@ TextureGenerator (trait)
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
                                 │
-                         TextureMap { albedo, normal, roughness }
+                 TextureMap { albedo, normal, roughness, emissive? }
                                 │
                 map_to_images()      → GeneratedHandles (repeat sampler)
                 map_to_images_card() → GeneratedHandles (clamp sampler)

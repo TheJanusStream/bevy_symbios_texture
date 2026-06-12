@@ -69,6 +69,7 @@ pub mod concrete;
 pub mod corrugated;
 pub mod curve;
 pub mod encaustic;
+pub(crate) mod fingerprint;
 pub mod generator;
 pub mod genetics;
 pub mod ground;
