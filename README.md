@@ -6,22 +6,29 @@ Generates albedo, normal, and roughness (ORM) maps entirely on the CPU — no
 asset files required. All surface textures are seamlessly tileable by
 construction via toroidal 4-D noise mapping. Alpha-masked card textures (leaf,
 twig, window, stained glass, iron grille) produce per-pixel transparency and
-do not tile.
+do not tile. Sprite-atlas generators (soft disc, spark, snowflake, puff, ring,
+petal, shard) bake alpha-silhouette particle-billboard sheets where every
+atlas cell is a per-cell-seeded variant of the same config.
 
 ## Bevy compatibility
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.4                  | 0.18 |
+| 0.4 – 0.5            | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.4"
+bevy_symbios_texture = "0.5"
+```
 
-# Optional: egui editor panel (required for the texture_viewer example)
-bevy_symbios_texture = { version = "0.4", features = ["egui"] }
+The optional `egui` feature adds editor widgets for every config type
+(required for the `texture_viewer` example):
+
+```toml
+[dependencies]
+bevy_symbios_texture = { version = "0.5", features = ["egui"] }
 ```
 
 ## Quick start
@@ -166,8 +173,8 @@ eviction, default) and `FileStore` (binary blobs on disk) — and exposes the
 ### Animated parameter curves
 
 Time-varying weathering, age, and seasonal change are first-class via the
-[`AnimatedProceduralMaterial`] component plus a small set of
-[`ParameterCurve`] impls (`Linear`, `EaseInOut`, `Stepped`, `ScriptedFn`).
+`AnimatedProceduralMaterial` component plus a small set of
+`ParameterCurve` impls (`Linear`, `EaseInOut`, `Stepped`, `ScriptedFn`).
 Attach the component to a material entity and the
 `tick_animated_procedural_materials` system regenerates the texture
 whenever the curve's output changes:
@@ -226,7 +233,7 @@ All tileable generators produce three seamlessly-repeating maps:
 | `normal`   | `Rgba8Unorm`     | Tangent-space normal (R=X, G=Y, B=Z)      |
 | `roughness`| `Rgba8Unorm`     | ORM: R=Occlusion, G=Roughness, B=Metallic |
 
-Upload with [`map_to_images`] to get repeat-wrapping samplers.
+Upload with `map_to_images` to get repeat-wrapping samplers.
 
 #### Bark
 
@@ -618,7 +625,7 @@ let config = EncausticConfig {
 
 Card generators produce an RGBA8 texture where `albedo.alpha` encodes the
 silhouette (`0` = fully transparent, `255` = fully opaque).  Upload with
-[`map_to_images_card`] so the sampler does not tile and the alpha silhouette
+`map_to_images_card` so the sampler does not tile and the alpha silhouette
 does not bleed at edges.
 
 #### Leaf
@@ -752,6 +759,204 @@ let config = IronGrilleConfig {
 };
 ```
 
+### Sprite atlases
+
+The sprite family produces small alpha-silhouette cards aimed at particle
+billboards.  Unlike the foliage cards, each sprite generator can bake a
+`variant_rows × variant_cols` **atlas** in a single image: every cell renders
+the same config with a per-cell derived seed, so a particle system using
+random atlas frames gets per-particle shape variety from one texture bake.
+Atlas dimensions are clamped to `1..=16` per axis; `1 × 1` bakes a single
+sprite.  Soft fractional alpha is encouraged — glows and mist fade out
+smoothly rather than cutting like foliage cards.
+
+Shared scaffolding (the `SpriteCell` trait, the `generate_atlas` driver, and
+the deterministic `CellRng` parameter stream) lives in the `sprite` module.
+Upload with `map_to_images_card`; sprites never tile.
+
+```rust
+use bevy_symbios_texture::{
+    generator::{TextureGenerator, map_to_images_card},
+    spark::{SparkConfig, SparkGenerator},
+};
+
+let map = SparkGenerator::new(SparkConfig {
+    variant_rows: 4,       // 4 × 4 atlas = 16 spark variants in one bake
+    variant_cols: 4,
+    ..SparkConfig::default()
+})
+.generate(512, 512)
+.expect("valid dimensions");
+
+let handles = map_to_images_card(map, &mut images);
+```
+
+#### Soft Disc
+
+Radial-falloff disc with a solid core and tunable halo — the workhorse
+particle sprite: fireflies, embers, mist motes, bokeh glints, additive glows.
+
+```rust
+use bevy_symbios_texture::soft_disc::SoftDiscConfig;
+
+let config = SoftDiscConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]
+    variant_cols: 1,       // atlas columns [1, 16]
+    color_core: [1.0, 0.98, 0.9],   // centre colour, linear RGB
+    color_halo: [1.0, 0.72, 0.25],  // outer halo colour
+    core_radius: 0.15,     // fully-opaque core radius [0, 0.9]
+    falloff: 2.5,          // halo falloff exponent [0.3, 8]; higher = tighter glow
+    ellipticity: 0.0,      // max per-variant elongation [0, 0.6]; 0 = always round
+    scale_jitter: 0.15,    // per-variant shrink fraction [0, 0.5]
+    normal_strength: 1.0,
+};
+```
+
+#### Spark
+
+N-pointed streak burst: a bright core with radial arms fading toward their
+tips.  Embers, glints, impact sparks, magic sparkles.
+
+```rust
+use bevy_symbios_texture::spark::SparkConfig;
+
+let config = SparkConfig {
+    seed: 0,
+    variant_rows: 2,
+    variant_cols: 2,
+    points: 4,             // number of streak arms [2, 12]
+    color_core: [1.0, 0.95, 0.8],
+    color_tip: [1.0, 0.45, 0.1],
+    core_radius: 0.12,     // solid central glow radius [0.02, 0.5]
+    arm_sharpness: 3.0,    // angular tightness [0.5, 10]; higher = needle-thin
+    falloff: 1.8,          // radial fade exponent along each arm [0.5, 6]
+    length_jitter: 0.3,    // per-arm length jitter [0, 0.8]
+    normal_strength: 1.0,
+};
+```
+
+#### Snowflake
+
+Dendritic flake with N-fold symmetry: a central plate, one main arm per
+sector, and paired side branches.  Per-variant jitter is where the "no two
+snowflakes alike" character comes from.
+
+```rust
+use bevy_symbios_texture::snowflake::SnowflakeConfig;
+
+let config = SnowflakeConfig {
+    seed: 0,
+    variant_rows: 2,
+    variant_cols: 2,
+    arms: 6,               // symmetry order [3, 8]; real snow is hexagonal
+    color: [0.92, 0.96, 1.0],
+    core_radius: 0.12,     // central plate radius [0, 0.4]
+    arm_width: 0.045,      // main-arm half-width at the centre [0.01, 0.12]
+    branch_pairs: 3,       // side-branch pairs per arm [0, 5]
+    branch_angle: 1.05,    // branch angle, radians [0.3, 1.4]; ~60° is realistic
+    branch_scale: 0.45,    // branch length vs remaining arm length [0.1, 1]
+    softness: 0.02,        // anti-aliasing edge width [0.005, 0.08]
+    normal_strength: 1.5,
+};
+```
+
+#### Puff
+
+Billowy blob of domain-warped fractal noise masked by a soft radial falloff.
+Dust motes, smoke, fog banks, sea mist.
+
+```rust
+use bevy_symbios_texture::puff::PuffConfig;
+
+let config = PuffConfig {
+    seed: 0,
+    variant_rows: 2,
+    variant_cols: 2,
+    color_base: [0.86, 0.86, 0.9],    // lit colour
+    color_shadow: [0.52, 0.52, 0.58], // noise-trough colour
+    noise_scale: 3.0,      // noise frequency across a cell [1, 8]
+    octaves: 4,            // fractal octave count [1, 8]
+    warp: 0.45,            // domain-warp strength [0, 1.5]; billows the silhouette
+    density: 0.9,          // overall alpha multiplier [0, 1]
+    edge_falloff: 2.0,     // radial mask exponent [0.5, 6]; higher = rounder puff
+    contrast: 1.3,         // noise remap exponent [0.5, 4]; higher = wispier
+    normal_strength: 1.0,
+};
+```
+
+#### Ring
+
+Soft annulus with optional angular waviness: shockwaves, water-drop ripples,
+magic circles, halos.
+
+```rust
+use bevy_symbios_texture::ring::RingConfig;
+
+let config = RingConfig {
+    seed: 0,
+    variant_rows: 1,
+    variant_cols: 1,
+    color: [0.85, 0.93, 1.0],
+    radius: 0.6,           // centreline radius [0.1, 0.9]
+    thickness: 0.12,       // annulus half-thickness [0.01, 0.5]
+    falloff: 2.0,          // cross-section falloff exponent [0.5, 6]
+    waviness: 0.0,         // angular radius modulation [0, 0.3]; 0 = perfect circle
+    wave_count: 6,         // waviness lobes around the ring [2, 16]
+    radius_jitter: 0.1,    // per-variant radius jitter [0, 0.4]
+    normal_strength: 1.0,
+};
+```
+
+#### Petal
+
+A single flower petal: an obovate blade with a soft throat-to-edge gradient
+and an optional notched tip.  Petal-fall particles, blossom decals, or — at
+`1 × 1` — a building block for procedural flowers.
+
+```rust
+use bevy_symbios_texture::petal::PetalConfig;
+
+let config = PetalConfig {
+    seed: 0,
+    variant_rows: 2,
+    variant_cols: 2,
+    color_base: [0.98, 0.72, 0.82],   // main blade colour
+    color_edge: [0.93, 0.5, 0.66],    // silhouette-edge colour
+    color_throat: [0.99, 0.88, 0.55], // attachment-point (nectar guide) tint
+    length: 0.92,          // petal length as fraction of the cell [0.4, 1]
+    width: 0.6,            // max blade width [0.15, 0.95]
+    peak: 0.65,            // position of max width from the throat [0.3, 0.9]
+    tip_notch: 0.08,       // tip notch radius [0, 0.25]; 0 = smooth tip
+    curl: 0.4,             // lateral shading strength [0, 1]; fakes curl
+    asymmetry: 0.15,       // max per-variant axis skew [0, 0.4]
+    normal_strength: 1.5,
+};
+```
+
+#### Shard
+
+Irregular rock-chip / debris-flake silhouette: a jittered polygon with a
+darkened rim and noise-grained interior.  Impact debris, crumbling masonry,
+shattered ice, kicked-up gravel.
+
+```rust
+use bevy_symbios_texture::shard::ShardConfig;
+
+let config = ShardConfig {
+    seed: 0,
+    variant_rows: 2,
+    variant_cols: 2,
+    color_base: [0.46, 0.43, 0.4],  // interior colour
+    color_edge: [0.24, 0.22, 0.21], // fractured-rim colour
+    sides: 5,              // polygon vertex count [3, 9]
+    irregularity: 0.45,    // vertex jitter [0, 0.9]; 0 = regular polygon
+    edge_band: 0.18,       // darkened-rim width as fraction of radius [0.02, 0.5]
+    grain: 0.35,           // interior fractal-grain strength [0, 1]
+    normal_strength: 2.5,
+};
+```
+
 ## Evolutionary parameter search (genetics)
 
 All config types implement `symbios_genetics::Genotype`, making them
@@ -782,7 +987,7 @@ declarative macros (`impl_genotype!` / `impl_config_editor!`) rather than
 hand-written per-config boilerplate.  Each macro invocation declares the
 config struct, field kinds (seed, f64, colour, enum, etc.), and optional
 post-hooks for tiling-invariant fixups, keeping the per-config call site
-small while covering all 23 config types.
+small while covering all 30 config types.
 
 ## Architecture
 
@@ -814,7 +1019,16 @@ TextureGenerator (trait)
     ├── TwigGenerator       ─── LeafSampler × N (composite stem + leaves)
     ├── WindowGenerator     ─── rounded-box SDF frame/mullions + FBM grime
     ├── StainedGlassGenerator── toroidal Voronoi + lead came SDF + grime FBM
-    └── IronGrilleGenerator ─── bar SDF grid + joint rust FBM
+    ├── IronGrilleGenerator ─── bar SDF grid + joint rust FBM
+    │
+    │  Sprite atlases (alpha-masked cards, via sprite::generate_atlas)
+    ├── SoftDiscGenerator   ─── radial-falloff disc (core + halo)
+    ├── SparkGenerator      ─── N-armed streak burst
+    ├── SnowflakeGenerator  ─── dendritic N-fold flake
+    ├── PuffGenerator       ─── domain-warped FBM blob + radial mask
+    ├── RingGenerator       ─── soft annulus + angular waviness
+    ├── PetalGenerator      ─── obovate blade + throat/edge gradient
+    └── ShardGenerator      ─── jittered polygon chip + grain FBM
                                 │
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
@@ -827,21 +1041,25 @@ TextureGenerator (trait)
                         full mipmap chain (type-correct averaging)
 ```
 
-**Noise-in-constructor** — all generators build their noise objects
+**Noise-in-constructor** — the surface generators and the SDF-based cards
+(window, stained glass, iron grille) build their noise objects
 (`Fbm<Perlin>`, `RidgedMulti<Perlin>`, `ToroidalNoise<…>`) once in `new()`
 and store them as struct fields.  Calling `generate()` multiple times (e.g.
 to produce size variants of the same material) skips the initialisation cost.
-The only exception is `Worley`, which contains an `Rc` and is therefore
-`!Send`; generators that use Worley noise (`BarkGenerator`, `PlankGenerator`)
-construct it inside `generate()` so the struct remains `Send` for async tasks.
+`Worley` is the exception: it contains an `Rc` and is therefore `!Send`, so
+the generators that use it (`BarkGenerator`, `PlankGenerator`) construct it
+inside `generate()` to keep the struct `Send` for async tasks.  The foliage
+cards (`LeafGenerator`, `TwigGenerator` — leaf sampling also uses Worley) and
+the sprite generators hold only their config and build their samplers per
+`generate()` call.
 
 **Workspace buffer pooling** — generators that allocate large intermediate
 grids (e.g. `BarkGenerator`, `ThatchGenerator`) accept an optional
-[`Workspace`] via `generate_with_workspace()`.  The workspace maintains a
+`Workspace` via `generate_with_workspace()`.  The workspace maintains a
 pool of `Vec<f64>` buffers that are borrowed and returned across calls,
 eliminating repeated 128 MB+ allocations at 4096×4096 resolution.
 
-**Seamless tiling** is provided by [`ToroidalNoise`], which maps 2-D UV
+**Seamless tiling** is provided by `ToroidalNoise`, which maps 2-D UV
 coordinates onto a 4-D torus so that noise wraps perfectly at every edge:
 
 ```text
@@ -856,9 +1074,11 @@ resolve to the same 4-D point, guaranteeing zero-seam tiling.
 
 **Normal maps** are derived from the height field via central-difference
 gradients.  For the tileable surface textures the neighbours wrap toroidally,
-so the normals are also seamless.  For card textures (Leaf, Twig, Window, Stained Glass, Iron Grille) the
-boundary uses clamp-to-edge so normals do not bleed across the transparent
-silhouette border.
+so the normals are also seamless.  For card textures (leaf, twig, window,
+stained glass, iron grille, and all sprites) the boundary uses clamp-to-edge
+so normals do not bleed across the transparent silhouette border.  Sprite
+atlases additionally dilate heights into fully-transparent texels before
+derivation so the normals do not crease at silhouette edges.
 
 **Colour encoding** uses a 4096-entry sRGB lookup table (built once via
 `OnceLock`) to avoid repeated `f32::powf` calls during rasterisation.
@@ -873,7 +1093,9 @@ normal-map XYZ vectors are averaged and renormalized (avoiding zero-length
 normals in PBR shaders), and ORM values are averaged directly in linear space.
 16× anisotropic filtering is enabled on all samplers.
 
-## Running the viewer example
+## Examples
+
+### texture_viewer
 
 ```sh
 cargo run --example texture_viewer --features egui
@@ -881,9 +1103,29 @@ cargo run --example texture_viewer --features egui
 
 Displays an interactive material viewer with three columns: **albedo** (left),
 **normal map** (centre), and a **spinning 3-D PBR cube** (right) with the
-generated material applied.  An egui panel on the left lets you cycle through
-all 23 generators with **< Prev** / **Next >**, trigger a random **Mutate**
-(rate = 0.3), and edit every parameter live.
+generated material applied.  An egui panel on the left lets you select any of
+the 30 generators from a dropdown, trigger a random **Mutate** (rate = 0.3),
+and edit every parameter live.
+
+### procedural_material
+
+```sh
+cargo run --release --example procedural_material
+```
+
+Side-by-side comparison of `build_procedural_material_async` (left cube)
+against the manual `PendingTexture` + material-patching flow it replaces
+(right cube).
+
+### animated_rust
+
+```sh
+cargo run --release --example animated_rust
+```
+
+Animates rust coverage on a metal panel from 0 % to 100 % over ten seconds
+via `AnimatedProceduralMaterial` driving a `Linear` curve, throttled to
+roughly four regenerations per second.
 
 ## License
 

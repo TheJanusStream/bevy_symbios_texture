@@ -227,9 +227,10 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
 
 /// Upload a [`TextureMap`] into [`Assets<Image>`] with clamp-to-edge samplers.
 ///
-/// Use this for foliage cards (leaf, twig) where the texture must not tile
-/// and the alpha silhouette must not bleed across edges.  For tileable
-/// surfaces use [`map_to_images`] instead.
+/// Use this for alpha-masked cards (leaf, twig, window, stained glass, iron
+/// grille) and sprite atlases, where the texture must not tile and the alpha
+/// silhouette must not bleed across edges.  For tileable surfaces use
+/// [`map_to_images`] instead.
 pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
     GeneratedHandles {
         albedo: images.add(make_image(

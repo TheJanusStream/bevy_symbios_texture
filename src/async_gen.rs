@@ -14,10 +14,12 @@
 //! // uploads them with map_to_images (repeat sampler).
 //! commands.spawn(PendingTexture::bark(BarkConfig::default(), 512, 512));
 //!
-//! // Foliage cards (leaf, twig) — poll_texture_tasks automatically uses
+//! // Alpha-masked cards (leaf, twig, window, stained glass, iron grille)
+//! // and sprite atlases — poll_texture_tasks automatically uses
 //! // map_to_images_card (clamp-to-edge sampler) for these types.
 //! commands.spawn(PendingTexture::leaf(LeafConfig::default(), 512, 512));
 //! commands.spawn(PendingTexture::twig(TwigConfig::default(), 512, 512));
+//! commands.spawn(PendingTexture::spark(SparkConfig::default(), 256, 256));
 //!
 //! // Later, query for TextureReady to consume the handles.
 //! ```
@@ -210,7 +212,8 @@ pub struct PendingTexture {
     pub(crate) rx: std::sync::Mutex<mpsc::Receiver<Result<TextureMap, TextureError>>>,
     /// Set to `true` on drop; the background task checks this before starting.
     cancelled: Arc<AtomicBool>,
-    /// `true` for foliage cards (leaf, twig) that need a clamp-to-edge sampler.
+    /// `true` for alpha-masked cards (leaf, twig, window, stained glass,
+    /// iron grille) and sprite atlases that need a clamp-to-edge sampler.
     is_card: bool,
 }
 

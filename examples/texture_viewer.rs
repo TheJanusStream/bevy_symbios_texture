@@ -3,8 +3,8 @@
 //! Layout: **albedo** (left) | **normal map** (centre) | **spinning 3-D cube**
 //! (right) — a live PBR preview with the generated material applied.
 //!
-//! Use the egui panel to cycle materials with **< Prev** / **Next >**, trigger
-//! a random **Mutate**, and edit every parameter live.
+//! Use the egui panel to select a material from the dropdown, trigger a
+//! random **Mutate**, and edit every parameter live.
 //!
 //! Run with:
 //!   cargo run --example texture_viewer --features egui
