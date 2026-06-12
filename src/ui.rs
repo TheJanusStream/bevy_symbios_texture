@@ -677,6 +677,54 @@ impl_config_editor!(
 ///   caller can write the value back and prevent visual snap-back.
 /// - `regen` accumulates only on `drag_stopped()` or a non-drag change, avoiding
 ///   unnecessary texture regeneration during continuous slider drags.
+/// Renders the editor for whichever generator `cfg` currently wraps.
+///
+/// Returns the same `(changed, regen)` pair as the per-config editors.
+/// [`TextureConfig::None`](crate::material::TextureConfig::None) renders
+/// nothing.  The match is exhaustive, so a registry row without an editor
+/// fails compilation here — keeping the egui surface in sync with the
+/// generator roster.
+pub fn texture_config_editor(
+    ui: &mut egui::Ui,
+    cfg: &mut crate::material::TextureConfig,
+    id: egui::Id,
+) -> (bool, bool) {
+    use crate::material::TextureConfig as TC;
+    match cfg {
+        TC::None => (false, false),
+        TC::Leaf(c) => leaf_config_editor(ui, c, id),
+        TC::Twig(c) => twig_config_editor(ui, c, id),
+        TC::Bark(c) => bark_config_editor(ui, c, id),
+        TC::Window(c) => window_config_editor(ui, c, id),
+        TC::StainedGlass(c) => stained_glass_config_editor(ui, c, id),
+        TC::IronGrille(c) => iron_grille_config_editor(ui, c, id),
+        TC::Ground(c) => ground_config_editor(ui, c, id),
+        TC::Rock(c) => rock_config_editor(ui, c, id),
+        TC::Brick(c) => brick_config_editor(ui, c, id),
+        TC::Plank(c) => plank_config_editor(ui, c, id),
+        TC::Shingle(c) => shingle_config_editor(ui, c, id),
+        TC::Stucco(c) => stucco_config_editor(ui, c, id),
+        TC::Concrete(c) => concrete_config_editor(ui, c, id),
+        TC::Metal(c) => metal_config_editor(ui, c, id),
+        TC::Pavers(c) => pavers_config_editor(ui, c, id),
+        TC::Ashlar(c) => ashlar_config_editor(ui, c, id),
+        TC::Cobblestone(c) => cobblestone_config_editor(ui, c, id),
+        TC::Thatch(c) => thatch_config_editor(ui, c, id),
+        TC::Marble(c) => marble_config_editor(ui, c, id),
+        TC::Corrugated(c) => corrugated_config_editor(ui, c, id),
+        TC::Asphalt(c) => asphalt_config_editor(ui, c, id),
+        TC::Wainscoting(c) => wainscoting_config_editor(ui, c, id),
+        TC::Encaustic(c) => encaustic_config_editor(ui, c, id),
+        TC::SoftDisc(c) => soft_disc_config_editor(ui, c, id),
+        TC::Spark(c) => spark_config_editor(ui, c, id),
+        TC::Snowflake(c) => snowflake_config_editor(ui, c, id),
+        TC::Puff(c) => puff_config_editor(ui, c, id),
+        TC::Ring(c) => ring_config_editor(ui, c, id),
+        TC::Petal(c) => petal_config_editor(ui, c, id),
+        TC::Shard(c) => shard_config_editor(ui, c, id),
+    }
+}
+
 pub fn slider_debounced(
     ui: &mut egui::Ui,
     slider: impl egui::Widget,

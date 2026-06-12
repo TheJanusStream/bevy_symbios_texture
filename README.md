@@ -1008,6 +1008,15 @@ config struct, field kinds (seed, f64, colour, enum, etc.), and optional
 post-hooks for tiling-invariant fixups, keeping the per-config call site
 small while covering all 30 config types.
 
+`TextureConfig` itself also implements `Genotype` (mutation delegates to the
+wrapped config; crossover recombines like variants field-wise) and exposes
+registry-derived helpers — `all_defaults()` for dropdowns and benches,
+`module_name()` for stable identifiers, `generate_sync()` for synchronous
+dispatch, and (behind the `egui` feature) `ui::texture_config_editor` for
+variant-generic parameter editing.  The `texture_viewer` example and the
+criterion bench suite are built entirely on these, so they extend
+automatically when a generator is added to the registry.
+
 ## Architecture
 
 ```text

@@ -134,6 +134,46 @@ macro_rules! define_texture_config {
                 }
             }
 
+            /// One default-config instance of every generator variant, in
+            /// registry order.
+            ///
+            /// Drives generator dropdowns and benchmark suites without a
+            /// hand-maintained list — new registry rows appear here
+            /// automatically.  [`TextureConfig::None`] is not included.
+            pub fn all_defaults() -> Vec<TextureConfig> {
+                vec![$(Self::$variant(<$config_ty>::default())),*]
+            }
+
+            /// The generator's module name (e.g. `"stained_glass"`) — the
+            /// snake_case counterpart of [`label`](TextureConfig::label),
+            /// useful for stable benchmark and file identifiers.
+            pub fn module_name(&self) -> &'static str {
+                match self {
+                    Self::None => "none",
+                    $(Self::$variant(_) => stringify!($module)),*,
+                }
+            }
+
+            /// Run the generator synchronously on the calling thread.
+            ///
+            /// Returns `None` for [`TextureConfig::None`].  The generator is
+            /// constructed per call — microseconds of setup against the
+            /// milliseconds of pixel work; hold a concrete generator
+            /// (e.g. [`BarkGenerator`](crate::bark::BarkGenerator)) when
+            /// producing many size variants of one config.
+            pub fn generate_sync(
+                &self,
+                width: u32,
+                height: u32,
+            ) -> Option<Result<crate::generator::TextureMap, crate::generator::TextureError>> {
+                use crate::generator::TextureGenerator as _;
+                match self {
+                    Self::None => None,
+                    $(Self::$variant(c) =>
+                        Some(<$generator_ty>::new(c.clone()).generate(width, height))),*,
+                }
+            }
+
             /// Stable per-config fingerprint suitable for cache keys.
             ///
             /// Structurally hashes the config through its serde

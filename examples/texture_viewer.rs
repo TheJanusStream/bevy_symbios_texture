@@ -26,49 +26,7 @@ use rand::{SeedableRng, rngs::StdRng};
 use symbios_genetics::Genotype;
 
 use bevy_symbios_texture::{
-    SymbiosTexturePlugin,
-    ashlar::AshlarConfig,
-    asphalt::AsphaltConfig,
-    async_gen::{PendingTexture, TextureReady},
-    bark::BarkConfig,
-    brick::BrickConfig,
-    cobblestone::CobblestoneConfig,
-    concrete::ConcreteConfig,
-    corrugated::CorrugatedConfig,
-    encaustic::EncausticConfig,
-    ground::GroundConfig,
-    iron_grille::IronGrilleConfig,
-    leaf::LeafConfig,
-    marble::MarbleConfig,
-    metal::MetalConfig,
-    pavers::PaversConfig,
-    petal::PetalConfig,
-    plank::PlankConfig,
-    puff::PuffConfig,
-    ring::RingConfig,
-    rock::RockConfig,
-    shard::ShardConfig,
-    shingle::ShingleConfig,
-    snowflake::SnowflakeConfig,
-    soft_disc::SoftDiscConfig,
-    spark::SparkConfig,
-    stained_glass::StainedGlassConfig,
-    stucco::StuccoConfig,
-    thatch::ThatchConfig,
-    twig::TwigConfig,
-    ui::{
-        ashlar_config_editor, asphalt_config_editor, bark_config_editor, brick_config_editor,
-        cobblestone_config_editor, concrete_config_editor, corrugated_config_editor,
-        encaustic_config_editor, ground_config_editor, iron_grille_config_editor,
-        leaf_config_editor, marble_config_editor, metal_config_editor, pavers_config_editor,
-        petal_config_editor, plank_config_editor, puff_config_editor, ring_config_editor,
-        rock_config_editor, shard_config_editor, shingle_config_editor, snowflake_config_editor,
-        soft_disc_config_editor, spark_config_editor, stained_glass_config_editor,
-        stucco_config_editor, thatch_config_editor, twig_config_editor, wainscoting_config_editor,
-        window_config_editor,
-    },
-    wainscoting::WainscotingConfig,
-    window::WindowConfig,
+    SymbiosTexturePlugin, TextureConfig, async_gen::TextureReady, ui::texture_config_editor,
 };
 
 const TEX_SIZE: u32 = 512;
@@ -133,147 +91,6 @@ fn main() {
 // Material configs
 // ---------------------------------------------------------------------------
 
-#[derive(Clone)]
-enum PanelConfig {
-    Bark(BarkConfig),
-    Rock(RockConfig),
-    Ground(GroundConfig),
-    Leaf(LeafConfig),
-    Twig(TwigConfig),
-    Brick(BrickConfig),
-    Window(WindowConfig),
-    Plank(PlankConfig),
-    Shingle(ShingleConfig),
-    Stucco(StuccoConfig),
-    Concrete(ConcreteConfig),
-    Metal(MetalConfig),
-    Pavers(PaversConfig),
-    Ashlar(AshlarConfig),
-    Cobblestone(CobblestoneConfig),
-    Thatch(ThatchConfig),
-    Marble(MarbleConfig),
-    Corrugated(CorrugatedConfig),
-    Asphalt(AsphaltConfig),
-    Wainscoting(WainscotingConfig),
-    StainedGlass(StainedGlassConfig),
-    IronGrille(IronGrilleConfig),
-    Encaustic(EncausticConfig),
-    SoftDisc(SoftDiscConfig),
-    Spark(SparkConfig),
-    Snowflake(SnowflakeConfig),
-    Puff(PuffConfig),
-    Ring(RingConfig),
-    Petal(PetalConfig),
-    Shard(ShardConfig),
-}
-
-impl PanelConfig {
-    fn mutate_in_place<R: rand::Rng>(&mut self, rng: &mut R, rate: f32) {
-        match self {
-            PanelConfig::Bark(c) => c.mutate(rng, rate),
-            PanelConfig::Rock(c) => c.mutate(rng, rate),
-            PanelConfig::Ground(c) => c.mutate(rng, rate),
-            PanelConfig::Leaf(c) => c.mutate(rng, rate),
-            PanelConfig::Twig(c) => c.mutate(rng, rate),
-            PanelConfig::Brick(c) => c.mutate(rng, rate),
-            PanelConfig::Window(c) => c.mutate(rng, rate),
-            PanelConfig::Plank(c) => c.mutate(rng, rate),
-            PanelConfig::Shingle(c) => c.mutate(rng, rate),
-            PanelConfig::Stucco(c) => c.mutate(rng, rate),
-            PanelConfig::Concrete(c) => c.mutate(rng, rate),
-            PanelConfig::Metal(c) => c.mutate(rng, rate),
-            PanelConfig::Pavers(c) => c.mutate(rng, rate),
-            PanelConfig::Ashlar(c) => c.mutate(rng, rate),
-            PanelConfig::Cobblestone(c) => c.mutate(rng, rate),
-            PanelConfig::Thatch(c) => c.mutate(rng, rate),
-            PanelConfig::Marble(c) => c.mutate(rng, rate),
-            PanelConfig::Corrugated(c) => c.mutate(rng, rate),
-            PanelConfig::Asphalt(c) => c.mutate(rng, rate),
-            PanelConfig::Wainscoting(c) => c.mutate(rng, rate),
-            PanelConfig::StainedGlass(c) => c.mutate(rng, rate),
-            PanelConfig::IronGrille(c) => c.mutate(rng, rate),
-            PanelConfig::Encaustic(c) => c.mutate(rng, rate),
-            PanelConfig::SoftDisc(c) => c.mutate(rng, rate),
-            PanelConfig::Spark(c) => c.mutate(rng, rate),
-            PanelConfig::Snowflake(c) => c.mutate(rng, rate),
-            PanelConfig::Puff(c) => c.mutate(rng, rate),
-            PanelConfig::Ring(c) => c.mutate(rng, rate),
-            PanelConfig::Petal(c) => c.mutate(rng, rate),
-            PanelConfig::Shard(c) => c.mutate(rng, rate),
-        }
-    }
-
-    fn spawn_pending(&self, width: u32, height: u32) -> PendingTexture {
-        match self {
-            PanelConfig::Bark(c) => PendingTexture::bark(c.clone(), width, height),
-            PanelConfig::Rock(c) => PendingTexture::rock(c.clone(), width, height),
-            PanelConfig::Ground(c) => PendingTexture::ground(c.clone(), width, height),
-            PanelConfig::Leaf(c) => PendingTexture::leaf(c.clone(), width, height),
-            PanelConfig::Twig(c) => PendingTexture::twig(c.clone(), width, height),
-            PanelConfig::Brick(c) => PendingTexture::brick(c.clone(), width, height),
-            PanelConfig::Window(c) => PendingTexture::window(c.clone(), width, height),
-            PanelConfig::Plank(c) => PendingTexture::plank(c.clone(), width, height),
-            PanelConfig::Shingle(c) => PendingTexture::shingle(c.clone(), width, height),
-            PanelConfig::Stucco(c) => PendingTexture::stucco(c.clone(), width, height),
-            PanelConfig::Concrete(c) => PendingTexture::concrete(c.clone(), width, height),
-            PanelConfig::Metal(c) => PendingTexture::metal(c.clone(), width, height),
-            PanelConfig::Pavers(c) => PendingTexture::pavers(c.clone(), width, height),
-            PanelConfig::Ashlar(c) => PendingTexture::ashlar(c.clone(), width, height),
-            PanelConfig::Cobblestone(c) => PendingTexture::cobblestone(c.clone(), width, height),
-            PanelConfig::Thatch(c) => PendingTexture::thatch(c.clone(), width, height),
-            PanelConfig::Marble(c) => PendingTexture::marble(c.clone(), width, height),
-            PanelConfig::Corrugated(c) => PendingTexture::corrugated(c.clone(), width, height),
-            PanelConfig::Asphalt(c) => PendingTexture::asphalt(c.clone(), width, height),
-            PanelConfig::Wainscoting(c) => PendingTexture::wainscoting(c.clone(), width, height),
-            PanelConfig::StainedGlass(c) => PendingTexture::stained_glass(c.clone(), width, height),
-            PanelConfig::IronGrille(c) => PendingTexture::iron_grille(c.clone(), width, height),
-            PanelConfig::Encaustic(c) => PendingTexture::encaustic(c.clone(), width, height),
-            PanelConfig::SoftDisc(c) => PendingTexture::soft_disc(c.clone(), width, height),
-            PanelConfig::Spark(c) => PendingTexture::spark(c.clone(), width, height),
-            PanelConfig::Snowflake(c) => PendingTexture::snowflake(c.clone(), width, height),
-            PanelConfig::Puff(c) => PendingTexture::puff(c.clone(), width, height),
-            PanelConfig::Ring(c) => PendingTexture::ring(c.clone(), width, height),
-            PanelConfig::Petal(c) => PendingTexture::petal(c.clone(), width, height),
-            PanelConfig::Shard(c) => PendingTexture::shard(c.clone(), width, height),
-        }
-    }
-
-    fn label(&self) -> &'static str {
-        match self {
-            PanelConfig::Bark(_) => "Bark",
-            PanelConfig::Rock(_) => "Rock",
-            PanelConfig::Ground(_) => "Ground",
-            PanelConfig::Leaf(_) => "Leaf",
-            PanelConfig::Twig(_) => "Twig",
-            PanelConfig::Brick(_) => "Brick",
-            PanelConfig::Window(_) => "Window",
-            PanelConfig::Plank(_) => "Plank",
-            PanelConfig::Shingle(_) => "Shingle",
-            PanelConfig::Stucco(_) => "Stucco",
-            PanelConfig::Concrete(_) => "Concrete",
-            PanelConfig::Metal(_) => "Metal",
-            PanelConfig::Pavers(_) => "Pavers",
-            PanelConfig::Ashlar(_) => "Ashlar",
-            PanelConfig::Cobblestone(_) => "Cobblestone",
-            PanelConfig::Thatch(_) => "Thatch",
-            PanelConfig::Marble(_) => "Marble",
-            PanelConfig::Corrugated(_) => "Corrugated Metal",
-            PanelConfig::Asphalt(_) => "Asphalt",
-            PanelConfig::Wainscoting(_) => "Wainscoting",
-            PanelConfig::StainedGlass(_) => "Stained Glass",
-            PanelConfig::IronGrille(_) => "Iron Grille",
-            PanelConfig::Encaustic(_) => "Encaustic Tile",
-            PanelConfig::SoftDisc(_) => "Soft Disc",
-            PanelConfig::Spark(_) => "Spark",
-            PanelConfig::Snowflake(_) => "Snowflake",
-            PanelConfig::Puff(_) => "Puff",
-            PanelConfig::Ring(_) => "Ring",
-            PanelConfig::Petal(_) => "Petal",
-            PanelConfig::Shard(_) => "Shard",
-        }
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Resources
 // ---------------------------------------------------------------------------
@@ -281,7 +98,7 @@ impl PanelConfig {
 /// All material configs and their cached texture handles.
 #[derive(Resource, Default)]
 struct MaterialStore {
-    configs: Vec<PanelConfig>,
+    configs: Vec<TextureConfig>,
     /// `(albedo, normal)` handles; `None` while still generating.
     textures: Vec<Option<(Handle<Image>, Handle<Image>)>>,
     /// Monotonic counter per slot — stale task results are discarded.
@@ -349,45 +166,18 @@ struct TaskSlot {
 // ---------------------------------------------------------------------------
 
 fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
-    let configs = vec![
-        PanelConfig::Bark(BarkConfig::default()),
-        PanelConfig::Rock(RockConfig::default()),
-        PanelConfig::Ground(GroundConfig::default()),
-        PanelConfig::Leaf(LeafConfig::default()),
-        PanelConfig::Twig(TwigConfig::default()),
-        PanelConfig::Brick(BrickConfig::default()),
-        PanelConfig::Window(WindowConfig::default()),
-        PanelConfig::Plank(PlankConfig::default()),
-        PanelConfig::Shingle(ShingleConfig::default()),
-        PanelConfig::Stucco(StuccoConfig::default()),
-        PanelConfig::Concrete(ConcreteConfig::default()),
-        PanelConfig::Metal(MetalConfig::default()),
-        PanelConfig::Pavers(PaversConfig::default()),
-        PanelConfig::Ashlar(AshlarConfig::default()),
-        PanelConfig::Cobblestone(CobblestoneConfig::default()),
-        PanelConfig::Thatch(ThatchConfig::default()),
-        PanelConfig::Marble(MarbleConfig::default()),
-        PanelConfig::Corrugated(CorrugatedConfig::default()),
-        PanelConfig::Asphalt(AsphaltConfig::default()),
-        PanelConfig::Wainscoting(WainscotingConfig::default()),
-        PanelConfig::StainedGlass(StainedGlassConfig::default()),
-        PanelConfig::IronGrille(IronGrilleConfig::default()),
-        PanelConfig::Encaustic(EncausticConfig::default()),
-        PanelConfig::SoftDisc(SoftDiscConfig::default()),
-        PanelConfig::Spark(SparkConfig::default()),
-        PanelConfig::Snowflake(SnowflakeConfig::default()),
-        PanelConfig::Puff(PuffConfig::default()),
-        PanelConfig::Ring(RingConfig::default()),
-        PanelConfig::Petal(PetalConfig::default()),
-        PanelConfig::Shard(ShardConfig::default()),
-    ];
+    // The registry order drives the dropdown — new generators appear
+    // automatically (TextureConfig::all_defaults derives from the registry).
+    let configs = TextureConfig::all_defaults();
 
     store.textures = vec![None; configs.len()];
     store.generations = vec![0; configs.len()];
     store.is_card = Vec::with_capacity(configs.len());
 
     for (i, config) in configs.iter().enumerate() {
-        let pending = config.spawn_pending(TEX_SIZE, TEX_SIZE);
+        let pending = config
+            .spawn(TEX_SIZE, TEX_SIZE)
+            .expect("all_defaults never yields TextureConfig::None");
         store.is_card.push(pending.is_card());
         commands.spawn((
             pending,
@@ -618,38 +408,7 @@ fn render_ui(
             ui.separator();
 
             let id = egui::Id::new("viewer_config");
-            let (_, r) = match &mut store.configs[slot] {
-                PanelConfig::Bark(c) => bark_config_editor(ui, c, id),
-                PanelConfig::Rock(c) => rock_config_editor(ui, c, id),
-                PanelConfig::Ground(c) => ground_config_editor(ui, c, id),
-                PanelConfig::Leaf(c) => leaf_config_editor(ui, c, id),
-                PanelConfig::Twig(c) => twig_config_editor(ui, c, id),
-                PanelConfig::Brick(c) => brick_config_editor(ui, c, id),
-                PanelConfig::Window(c) => window_config_editor(ui, c, id),
-                PanelConfig::Plank(c) => plank_config_editor(ui, c, id),
-                PanelConfig::Shingle(c) => shingle_config_editor(ui, c, id),
-                PanelConfig::Stucco(c) => stucco_config_editor(ui, c, id),
-                PanelConfig::Concrete(c) => concrete_config_editor(ui, c, id),
-                PanelConfig::Metal(c) => metal_config_editor(ui, c, id),
-                PanelConfig::Pavers(c) => pavers_config_editor(ui, c, id),
-                PanelConfig::Ashlar(c) => ashlar_config_editor(ui, c, id),
-                PanelConfig::Cobblestone(c) => cobblestone_config_editor(ui, c, id),
-                PanelConfig::Thatch(c) => thatch_config_editor(ui, c, id),
-                PanelConfig::Marble(c) => marble_config_editor(ui, c, id),
-                PanelConfig::Corrugated(c) => corrugated_config_editor(ui, c, id),
-                PanelConfig::Asphalt(c) => asphalt_config_editor(ui, c, id),
-                PanelConfig::Wainscoting(c) => wainscoting_config_editor(ui, c, id),
-                PanelConfig::StainedGlass(c) => stained_glass_config_editor(ui, c, id),
-                PanelConfig::IronGrille(c) => iron_grille_config_editor(ui, c, id),
-                PanelConfig::Encaustic(c) => encaustic_config_editor(ui, c, id),
-                PanelConfig::SoftDisc(c) => soft_disc_config_editor(ui, c, id),
-                PanelConfig::Spark(c) => spark_config_editor(ui, c, id),
-                PanelConfig::Snowflake(c) => snowflake_config_editor(ui, c, id),
-                PanelConfig::Puff(c) => puff_config_editor(ui, c, id),
-                PanelConfig::Ring(c) => ring_config_editor(ui, c, id),
-                PanelConfig::Petal(c) => petal_config_editor(ui, c, id),
-                PanelConfig::Shard(c) => shard_config_editor(ui, c, id),
-            };
+            let (_, r) = texture_config_editor(ui, &mut store.configs[slot], id);
 
             if loading {
                 ui.horizontal(|ui| {
@@ -668,7 +427,7 @@ fn render_ui(
 
     // Mutation randomises the config then triggers regen.
     if mutate {
-        store.configs[slot].mutate_in_place(&mut rng.0, 0.3);
+        store.configs[slot].mutate(&mut rng.0, 0.3);
         regen = true;
     }
 
@@ -677,7 +436,9 @@ fn render_ui(
         store.textures[slot] = None;
         let next_gen = store.generations[slot].wrapping_add(1);
         store.generations[slot] = next_gen;
-        let pending = store.configs[slot].spawn_pending(TEX_SIZE, TEX_SIZE);
+        let pending = store.configs[slot]
+            .spawn(TEX_SIZE, TEX_SIZE)
+            .expect("viewer slots never hold TextureConfig::None");
         commands.spawn((
             pending,
             TaskSlot {

@@ -24,6 +24,8 @@ use std::f64::consts::PI;
 use rand::Rng;
 use symbios_genetics::Genotype;
 
+use crate::material::TextureConfig;
+
 use crate::{
     ashlar::AshlarConfig,
     asphalt::AsphaltConfig,
@@ -686,6 +688,41 @@ impl_genotype!(ShardConfig {
     grain: f64(0.1, 0.0, 1.0),
     normal_strength: f32(0.4, 0.0, 6.0),
 });
+
+// --- TextureConfig dispatch ---------------------------------------------------
+
+/// Generates the [`Genotype`] dispatch for the [`TextureConfig`] enum from
+/// the registry rows: mutation delegates to the wrapped config; crossover
+/// recombines like variants field-wise and falls back to a uniform parent
+/// pick for mismatched variants (their fields cannot be recombined).
+macro_rules! impl_texture_config_genotype {
+    ($(($variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, $kind:ident)),* $(,)?) => {
+        impl Genotype for TextureConfig {
+            fn mutate<R: Rng>(&mut self, rng: &mut R, rate: f32) {
+                match self {
+                    TextureConfig::None => {}
+                    $(TextureConfig::$variant(c) => c.mutate(rng, rate)),*,
+                }
+            }
+
+            fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
+                match (self, other) {
+                    $((TextureConfig::$variant(a), TextureConfig::$variant(b)) =>
+                        TextureConfig::$variant(a.crossover(b, rng)),)*
+                    (a, b) => {
+                        if rng.random::<bool>() {
+                            a.clone()
+                        } else {
+                            b.clone()
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+
+crate::registry::for_each_generator!(impl_texture_config_genotype);
 
 // --- tests ------------------------------------------------------------------
 
