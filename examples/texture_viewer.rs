@@ -1,15 +1,26 @@
 //! `texture_viewer` — interactive material viewer with egui editor.
 //!
-//! Layout: **albedo** (left) | **normal map** (centre) | **spinning 3-D cube**
+//! Layout: **albedo** (left) | **normal map** (centre) | **3-D preview**
 //! (right) — a live PBR preview with the generated material applied.
+//! Tileable surface textures get a spinning cube; alpha-masked cards and
+//! sprite atlases get a gently swaying alpha-blended quad in front of a
+//! checkerboard backdrop, so per-pixel alpha is actually visible.
 //!
 //! Use the egui panel to select a material from the dropdown, trigger a
 //! random **Mutate**, and edit every parameter live.
 //!
 //! Run with:
-//!   cargo run --example texture_viewer --features egui
+//!   cargo run --release --example texture_viewer --features egui
+//!
+//! (`--release` matters: unoptimized texture generation takes tens of
+//! seconds per 512² map.)
 
-use bevy::{camera::Viewport, prelude::*};
+use bevy::{
+    asset::RenderAssetUsages,
+    camera::Viewport,
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use rand::{SeedableRng, rngs::StdRng};
 use symbios_genetics::Genotype;
@@ -81,6 +92,22 @@ const CUBE_SIZE: f32 = 240.0;
 const SPIN_X: f32 = 0.20; // rad/s around X
 const SPIN_Y: f32 = 0.45; // rad/s around Y
 
+// Card preview: a flat quad swaying around Y. A full spin would put the quad
+// edge-on half the time, so it oscillates instead — enough to show the
+// normal-map response under the directional light.
+const CARD_SIZE: f32 = 300.0;
+const SWAY_RATE: f32 = 0.7; // sway phase speed (rad/s)
+const SWAY_AMPLITUDE: f32 = 0.6; // max yaw deflection (rad, ~34°)
+
+// Checkerboard backdrop behind the card quad — makes alpha edges judgeable.
+// Far enough back that the swaying quad's corners never reach it
+// (half-width × sin(amplitude) ≈ 85 world units of excursion), and sized so
+// it still projects to a visible frame around the quad despite being deeper.
+const BACKDROP_SIZE: f32 = 480.0;
+const BACKDROP_Z: f32 = -130.0;
+const CHECKER_TEX: u32 = 512; // backdrop texture side (texels)
+const CHECKER_CELL: u32 = 64; // checker cell side (texels)
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -98,7 +125,7 @@ fn main() {
         .add_systems(Startup, (setup_scene, spawn_tasks))
         .add_systems(EguiPrimaryContextPass, render_ui)
         .add_systems(Update, (collect_ready_textures, update_display).chain())
-        .add_systems(Update, spin_cube)
+        .add_systems(Update, (spin_cube, sway_card))
         .run();
 }
 
@@ -259,6 +286,11 @@ struct MaterialStore {
     textures: Vec<Option<(Handle<Image>, Handle<Image>)>>,
     /// Monotonic counter per slot — stale task results are discarded.
     generations: Vec<u32>,
+    /// `true` for alpha-masked cards / sprite atlases (card-quad preview);
+    /// `false` for tileable surfaces (cube preview). Captured from
+    /// `PendingTexture::is_card()` so the library stays the single source
+    /// of truth for the classification.
+    is_card: Vec<bool>,
 }
 
 /// Index of the material currently displayed on screen.
@@ -291,9 +323,19 @@ struct AlbedoDisplay;
 #[derive(Component)]
 struct NormalDisplay;
 
-/// Spinning 3-D cube in the right column — previews the full PBR material.
+/// Spinning 3-D cube in the right column — previews tileable surface materials.
 #[derive(Component)]
 struct CubeDisplay;
+
+/// Root of the card preview (quad + checkerboard backdrop) — shown instead of
+/// the cube for alpha-masked cards and sprite atlases. Visibility is toggled
+/// here so both children follow.
+#[derive(Component)]
+struct CardPreviewRoot;
+
+/// Swaying alpha-blended quad showing the card material itself.
+#[derive(Component)]
+struct CardDisplay;
 
 /// Carried on async-task entities to route results back to the right slot.
 #[derive(Component, Clone, Copy)]
@@ -342,9 +384,11 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
 
     store.textures = vec![None; configs.len()];
     store.generations = vec![0; configs.len()];
+    store.is_card = Vec::with_capacity(configs.len());
 
     for (i, config) in configs.iter().enumerate() {
         let pending = config.spawn_pending(TEX_SIZE, TEX_SIZE);
+        store.is_card.push(pending.is_card());
         commands.spawn((
             pending,
             TaskSlot {
@@ -357,10 +401,34 @@ fn spawn_tasks(mut commands: Commands, mut store: ResMut<MaterialStore>) {
     store.configs = configs;
 }
 
+/// Bakes the grey checkerboard texture shown behind the card-preview quad.
+fn checkerboard_image(images: &mut Assets<Image>) -> Handle<Image> {
+    let mut data = Vec::with_capacity((CHECKER_TEX * CHECKER_TEX * 4) as usize);
+    for y in 0..CHECKER_TEX {
+        for x in 0..CHECKER_TEX {
+            let light = ((x / CHECKER_CELL) + (y / CHECKER_CELL)).is_multiple_of(2);
+            let v = if light { 140 } else { 90 };
+            data.extend_from_slice(&[v, v, v, 255]);
+        }
+    }
+    images.add(Image::new(
+        Extent3d {
+            width: CHECKER_TEX,
+            height: CHECKER_TEX,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    ))
+}
+
 fn setup_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     // Camera2d — renders albedo and normal-map sprites to the full window.
     commands.spawn((
@@ -427,13 +495,47 @@ fn setup_scene(
     commands.spawn((
         Mesh3d(meshes.add(cube_mesh)),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.0, 0.0, 0.0),
+            base_color: Color::srgb(0.4, 0.4, 0.4),
             metallic: 0.0,
             perceptual_roughness: 1.0,
             ..default()
         })),
         CubeDisplay,
     ));
+
+    // Card preview — hidden until a card-style material is selected.
+    // Alpha-blended so the per-pixel alpha that defines card generators is
+    // actually visible; double-sided so the sway never shows a culled face.
+    let mut card_mesh = Rectangle::new(CARD_SIZE, CARD_SIZE).mesh().build();
+    let _ = card_mesh.generate_tangents();
+    commands
+        .spawn((Transform::default(), Visibility::Hidden, CardPreviewRoot))
+        .with_children(|parent| {
+            // Unlit checkerboard backdrop, behind the swaying quad.
+            parent.spawn((
+                Mesh3d(meshes.add(Rectangle::new(BACKDROP_SIZE, BACKDROP_SIZE))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color_texture: Some(checkerboard_image(&mut images)),
+                    unlit: true,
+                    ..default()
+                })),
+                Transform::from_xyz(0.0, 0.0, BACKDROP_Z),
+            ));
+            // The card quad itself.
+            parent.spawn((
+                Mesh3d(meshes.add(card_mesh)),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.4, 0.4, 0.4),
+                    metallic: 0.0,
+                    perceptual_roughness: 1.0,
+                    alpha_mode: AlphaMode::Blend,
+                    double_sided: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                CardDisplay,
+            ));
+        });
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +561,15 @@ fn spin_cube(time: Res<Time>, mut query: Query<&mut Transform, With<CubeDisplay>
     let t = time.elapsed_secs();
     for mut transform in &mut query {
         transform.rotation = Quat::from_euler(EulerRot::XYZ, t * SPIN_X, t * SPIN_Y, 0.0);
+    }
+}
+
+/// Oscillates the card quad around Y so lighting and normal-map response are
+/// visible without ever turning the quad edge-on.
+fn sway_card(time: Res<Time>, mut query: Query<&mut Transform, With<CardDisplay>>) {
+    let yaw = (time.elapsed_secs() * SWAY_RATE).sin() * SWAY_AMPLITUDE;
+    for mut transform in &mut query {
+        transform.rotation = Quat::from_rotation_y(yaw);
     }
 }
 
@@ -577,13 +688,55 @@ fn render_ui(
     }
 }
 
-/// Keeps the displayed sprites and PBR cube in sync with `CurrentSlot`.
+/// Applies the generated maps to a preview material, guarded so the asset is
+/// only mutated when the albedo handle actually changed.
+fn apply_preview_textures(
+    materials: &mut Assets<StandardMaterial>,
+    handle: &Handle<StandardMaterial>,
+    albedo: &Handle<Image>,
+    normal: &Handle<Image>,
+) {
+    let needs_update = materials
+        .get(handle)
+        .map(|m| m.base_color_texture.as_ref() != Some(albedo))
+        .unwrap_or(false);
+    if needs_update && let Some(mat) = materials.get_mut(handle) {
+        mat.base_color_texture = Some(albedo.clone());
+        mat.normal_map_texture = Some(normal.clone());
+        mat.base_color = Color::WHITE;
+    }
+}
+
+/// Resets a preview material to its grey placeholder while regenerating.
+fn reset_preview_textures(
+    materials: &mut Assets<StandardMaterial>,
+    handle: &Handle<StandardMaterial>,
+) {
+    let needs_reset = materials
+        .get(handle)
+        .map(|m| m.base_color_texture.is_some())
+        .unwrap_or(false);
+    if needs_reset && let Some(mat) = materials.get_mut(handle) {
+        mat.base_color_texture = None;
+        mat.normal_map_texture = None;
+        mat.base_color = Color::srgb(0.4, 0.4, 0.4);
+    }
+}
+
+/// Query filter matching either 3-D preview mesh (cube or card quad).
+type AnyPreviewMesh = Or<(With<CubeDisplay>, With<CardDisplay>)>;
+
+/// Query filter matching the two visibility-toggled preview roots.
+type AnyPreviewRoot = Or<(With<CubeDisplay>, With<CardPreviewRoot>)>;
+
+/// Keeps the displayed sprites and the 3-D preview in sync with `CurrentSlot`.
 fn update_display(
     store: Res<MaterialStore>,
     current: Res<CurrentSlot>,
     mut albedo_q: Query<&mut Sprite, (With<AlbedoDisplay>, Without<NormalDisplay>)>,
     mut normal_q: Query<&mut Sprite, (With<NormalDisplay>, Without<AlbedoDisplay>)>,
-    cube_q: Query<&MeshMaterial3d<StandardMaterial>, With<CubeDisplay>>,
+    preview_q: Query<&MeshMaterial3d<StandardMaterial>, AnyPreviewMesh>,
+    mut vis_q: Query<(&mut Visibility, Has<CardPreviewRoot>), AnyPreviewRoot>,
     mut std_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if store.configs.is_empty() {
@@ -591,6 +744,16 @@ fn update_display(
     }
 
     let slot = current.0;
+
+    // Cube for tileable surfaces; swaying quad + checkerboard for cards.
+    let is_card = store.is_card[slot];
+    for (mut vis, is_card_preview) in &mut vis_q {
+        vis.set_if_neq(if is_card_preview == is_card {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        });
+    }
 
     match &store.textures[slot] {
         Some((albedo, normal)) => {
@@ -606,17 +769,10 @@ fn update_display(
                 sprite.image = normal.clone();
                 sprite.color = Color::WHITE;
             }
-            // Update cube material only when the albedo handle actually changed.
-            if let Ok(cube_mat) = cube_q.single() {
-                let needs_update = std_materials
-                    .get(&cube_mat.0)
-                    .map(|m| m.base_color_texture.as_ref() != Some(albedo))
-                    .unwrap_or(false);
-                if needs_update && let Some(mat) = std_materials.get_mut(&cube_mat.0) {
-                    mat.base_color_texture = Some(albedo.clone());
-                    mat.normal_map_texture = Some(normal.clone());
-                    mat.base_color = Color::WHITE;
-                }
+            // Both preview materials stay in sync; the handle guard makes
+            // touching the hidden one free.
+            for mat in &preview_q {
+                apply_preview_textures(&mut std_materials, &mat.0, albedo, normal);
             }
         }
         None => {
@@ -628,16 +784,8 @@ fn update_display(
                 sprite.image = Handle::default();
                 sprite.color = Color::srgb(0.25, 0.25, 0.25);
             }
-            if let Ok(cube_mat) = cube_q.single() {
-                let needs_reset = std_materials
-                    .get(&cube_mat.0)
-                    .map(|m| m.base_color_texture.is_some())
-                    .unwrap_or(false);
-                if needs_reset && let Some(mat) = std_materials.get_mut(&cube_mat.0) {
-                    mat.base_color_texture = None;
-                    mat.normal_map_texture = None;
-                    mat.base_color = Color::srgb(0.4, 0.4, 0.4);
-                }
+            for mat in &preview_q {
+                reset_preview_textures(&mut std_materials, &mat.0);
             }
         }
     }

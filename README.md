@@ -1098,14 +1098,17 @@ normals in PBR shaders), and ORM values are averaged directly in linear space.
 ### texture_viewer
 
 ```sh
-cargo run --example texture_viewer --features egui
+cargo run --release --example texture_viewer --features egui
 ```
 
 Displays an interactive material viewer with three columns: **albedo** (left),
-**normal map** (centre), and a **spinning 3-D PBR cube** (right) with the
-generated material applied.  An egui panel on the left lets you select any of
-the 30 generators from a dropdown, trigger a random **Mutate** (rate = 0.3),
-and edit every parameter live.
+**normal map** (centre), and a **3-D PBR preview** (right) with the generated
+material applied.  Tileable surface textures are shown on a spinning cube;
+alpha-masked cards and sprite atlases get a gently swaying alpha-blended quad
+in front of a checkerboard backdrop instead, so per-pixel alpha is visible.
+An egui panel on the left lets you select any of the 30 generators from a
+dropdown, trigger a random **Mutate** (rate = 0.3), and edit every parameter
+live.
 
 ### procedural_material
 
