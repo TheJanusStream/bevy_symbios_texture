@@ -95,12 +95,17 @@ fn main() {
 // Resources
 // ---------------------------------------------------------------------------
 
+/// Per-slot generated handles: `(albedo, normal, emissive?)`, or `None`
+/// while a slot is still generating.  `emissive` is `Some` only for
+/// generators that bake a glow map (lava).
+type SlotTextures = Option<(Handle<Image>, Handle<Image>, Option<Handle<Image>>)>;
+
 /// All material configs and their cached texture handles.
 #[derive(Resource, Default)]
 struct MaterialStore {
     configs: Vec<TextureConfig>,
-    /// `(albedo, normal)` handles; `None` while still generating.
-    textures: Vec<Option<(Handle<Image>, Handle<Image>)>>,
+    /// Generated handles per slot; see [`SlotTextures`].
+    textures: Vec<SlotTextures>,
     /// Monotonic counter per slot — stale task results are discarded.
     generations: Vec<u32>,
     /// `true` for alpha-masked cards / sprite atlases (card-quad preview);
@@ -341,7 +346,11 @@ fn collect_ready_textures(
     for (entity, tex, task_slot) in &ready {
         commands.entity(entity).despawn();
         if store.generations[task_slot.slot] == task_slot.generation {
-            store.textures[task_slot.slot] = Some((tex.0.albedo.clone(), tex.0.normal.clone()));
+            store.textures[task_slot.slot] = Some((
+                tex.0.albedo.clone(),
+                tex.0.normal.clone(),
+                tex.0.emissive.clone(),
+            ));
         }
     }
 }
@@ -451,11 +460,16 @@ fn render_ui(
 
 /// Applies the generated maps to a preview material, guarded so the asset is
 /// only mutated when the albedo handle actually changed.
+///
+/// `emissive` is set for generators that bake a glow map (lava); the
+/// material's `emissive` colour factor is forced to white so Bevy does not
+/// multiply the map away (it multiplies `emissive_texture` by `emissive`).
 fn apply_preview_textures(
     materials: &mut Assets<StandardMaterial>,
     handle: &Handle<StandardMaterial>,
     albedo: &Handle<Image>,
     normal: &Handle<Image>,
+    emissive: Option<&Handle<Image>>,
 ) {
     let needs_update = materials
         .get(handle)
@@ -465,6 +479,12 @@ fn apply_preview_textures(
         mat.base_color_texture = Some(albedo.clone());
         mat.normal_map_texture = Some(normal.clone());
         mat.base_color = Color::WHITE;
+        mat.emissive_texture = emissive.cloned();
+        mat.emissive = if emissive.is_some() {
+            LinearRgba::WHITE
+        } else {
+            LinearRgba::BLACK
+        };
     }
 }
 
@@ -481,6 +501,8 @@ fn reset_preview_textures(
         mat.base_color_texture = None;
         mat.normal_map_texture = None;
         mat.base_color = Color::srgb(0.4, 0.4, 0.4);
+        mat.emissive_texture = None;
+        mat.emissive = LinearRgba::BLACK;
     }
 }
 
@@ -517,7 +539,7 @@ fn update_display(
     }
 
     match &store.textures[slot] {
-        Some((albedo, normal)) => {
+        Some((albedo, normal, emissive)) => {
             if let Ok(mut sprite) = albedo_q.single_mut()
                 && sprite.image != *albedo
             {
@@ -533,7 +555,13 @@ fn update_display(
             // Both preview materials stay in sync; the handle guard makes
             // touching the hidden one free.
             for mat in &preview_q {
-                apply_preview_textures(&mut std_materials, &mat.0, albedo, normal);
+                apply_preview_textures(
+                    &mut std_materials,
+                    &mat.0,
+                    albedo,
+                    normal,
+                    emissive.as_ref(),
+                );
             }
         }
         None => {

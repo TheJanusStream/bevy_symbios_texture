@@ -277,9 +277,11 @@ All tileable generators produce three seamlessly-repeating maps:
 
 Upload with `map_to_images` to get repeat-wrapping samplers.  When a
 generator produces an emissive map the polling systems assign it to
-`StandardMaterial::emissive_texture`, where Bevy multiplies it by the
-material's emissive colour factor — set `MaterialSettings::emission_color`
-to white and `emission_strength` to `1.0` for unmodified map output.
+`StandardMaterial::emissive_texture`; Bevy multiplies it by the material's
+emissive colour factor, which the material flow auto-defaults to white when
+`MaterialSettings::emission_color` / `emission_strength` are left unset, so
+the glow shows out of the box.  Set them only to tint or brighten beyond the
+map's encoded values.
 
 #### Bark
 
@@ -942,8 +944,9 @@ let config = LogEndConfig {
 Cooling lava: dark basalt plates from a toroidal Voronoi decomposition,
 separated by molten cracks that drive the **emissive map** — the glow colour
 ramps with crack depth and is written to `StandardMaterial::emissive_texture`.
-Set `MaterialSettings::emission_color` to white and `emission_strength` above
-zero, or the glow is multiplied away.
+The material flow auto-enables a white emissive factor when a glow map is
+present, so lava glows out of the box; set `emission_color` /
+`emission_strength` only to tint or brighten it.
 
 ```rust
 use bevy_symbios_texture::lava::LavaConfig;

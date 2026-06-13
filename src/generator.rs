@@ -65,15 +65,15 @@ pub struct TextureMap {
     /// base-plus-mips layout as `albedo`.
     pub roughness: Vec<u8>,
     /// Optional RGBA8 sRGB-encoded emissive (glow) pixels, row-major.  Same
-    /// base-plus-mips layout as `albedo`.  `None` for the non-glowing
-    /// generators (currently all of them); when present the polling systems
-    /// assign it to `StandardMaterial::emissive_texture`, where it is
-    /// multiplied by the material's `emissive` colour factor — set
-    /// [`MaterialSettings::emission_color`] /
-    /// [`emission_strength`](crate::MaterialSettings::emission_strength)
-    /// to white / 1.0 for unmodified map output.
-    ///
-    /// [`MaterialSettings::emission_color`]: crate::MaterialSettings::emission_color
+    /// base-plus-mips layout as `albedo`.  `None` for non-glowing generators;
+    /// `Some` for [`Lava`](crate::lava::LavaGenerator).  When present the
+    /// polling systems assign it to `StandardMaterial::emissive_texture` and,
+    /// because Bevy multiplies that texture by the material's `emissive`
+    /// colour factor, default an unset factor to white so the glow shows —
+    /// set
+    /// [`emission_color`](crate::MaterialSettings::emission_color) /
+    /// [`emission_strength`](crate::MaterialSettings::emission_strength) only
+    /// to tint or brighten beyond the map's encoded values.
     pub emissive: Option<Vec<u8>>,
     /// Texture width in texels.
     pub width: u32,

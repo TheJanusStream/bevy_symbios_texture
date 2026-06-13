@@ -5,9 +5,10 @@
 //! the `F2 − F1` boundary field collapses.  The crack field drives the
 //! crate's **emissive channel**: the glow colour ramps with crack depth and
 //! is written into [`TextureMap::emissive`], which the polling systems
-//! assign to `StandardMaterial::emissive_texture`.  Set
-//! `MaterialSettings::emission_color` to white and `emission_strength`
-//! above zero, or the glow map is multiplied away (see the emissive docs).
+//! assign to `StandardMaterial::emissive_texture`.  Bevy multiplies that
+//! texture by the material's emissive colour factor, which the material flow
+//! auto-defaults to white when you leave `MaterialSettings::emission_color` /
+//! `emission_strength` unset — so the glow shows out of the box.
 //!
 //! The albedo carries a faint heat tint near the cracks so the material
 //! still reads as hot without bloom.

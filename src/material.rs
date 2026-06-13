@@ -26,7 +26,7 @@ use bevy::ecs::system::{Commands, Query, ResMut};
 use bevy::image::Image;
 use bevy::math::{Affine2, Vec2};
 use bevy::pbr::StandardMaterial;
-use bevy::prelude::{AlphaMode, Color, Handle};
+use bevy::prelude::{AlphaMode, Color, Handle, LinearRgba};
 use bevy::render::render_resource::Face;
 
 use crate::async_gen::PendingTexture;
@@ -231,9 +231,13 @@ pub struct MaterialSettings {
     /// Multiplier applied to `emission_color` when computing the
     /// `StandardMaterial::emissive` linear value.
     ///
-    /// Bevy multiplies any generator-produced emissive *texture* by that
-    /// factor too, so keep this above zero (e.g. white × 1.0) for generators
-    /// that emit a glow map — at the default of 0.0 the map is invisible.
+    /// Bevy multiplies any generator-produced emissive *texture* by this
+    /// factor.  When a generator emits a glow map (e.g.
+    /// [`Lava`](crate::lava::LavaGenerator)) and you leave both this and
+    /// `emission_color` at their defaults, the factor is auto-defaulted to
+    /// white so the map shows at its encoded values — set a non-default
+    /// `emission_color` / `emission_strength` here only to tint or brighten
+    /// (e.g. above 1.0 for HDR bloom).
     pub emission_strength: f32,
     /// Perceptual roughness in `[0, 1]`.
     pub roughness: f32,
@@ -278,6 +282,40 @@ pub struct PatchMaterialTextures {
     /// Cache key the result should be stored under, when a [`TextureCache`]
     /// is present.  `None` disables caching for this task.
     pub cache_key: Option<TextureCacheKey>,
+}
+
+/// Assign a generator-produced emissive map to `material`, defaulting the
+/// emissive *factor* so the glow is actually visible.
+///
+/// Bevy multiplies `emissive_texture` by [`StandardMaterial::emissive`], so
+/// the black factor that a non-emissive material carries by default would
+/// hide the map entirely.  This helper treats a *white* factor as the
+/// sentinel for "auto-enabled for a generated glow map":
+///
+/// * a map arrived while the factor is still the black default → set it to
+///   white so the map shows at its encoded values;
+/// * no map arrived but the factor is the auto-white → reset it to black so
+///   an animated regeneration that drops the glow does not leave the whole
+///   surface emitting white.
+///
+/// A caller-supplied non-black, non-white factor (e.g. a tinted or
+/// brightened glow set via [`MaterialSettings::emission_color`] /
+/// [`emission_strength`](MaterialSettings::emission_strength)) is left
+/// untouched in both directions.
+fn apply_emissive_map(material: &mut StandardMaterial, emissive: Option<Handle<Image>>) {
+    // Compare RGB only: the emissive factor's alpha is not used for emission,
+    // and `emission_color × emission_strength` yields `{0,0,0,0}` (alpha 0) at
+    // the defaults — distinct from `LinearRgba::BLACK` (alpha 1).  White is
+    // the sentinel meaning "auto-enabled for a generated glow map".
+    let e = material.emissive;
+    let factor_is_unset = e.red == 0.0 && e.green == 0.0 && e.blue == 0.0;
+    let factor_is_auto_white = e.red == 1.0 && e.green == 1.0 && e.blue == 1.0;
+    match &emissive {
+        Some(_) if factor_is_unset => material.emissive = LinearRgba::WHITE,
+        None if factor_is_auto_white => material.emissive = LinearRgba::BLACK,
+        _ => {}
+    }
+    material.emissive_texture = emissive;
 }
 
 /// One-shot helper: build a [`StandardMaterial`] from `settings`, dispatch
@@ -342,7 +380,7 @@ pub fn build_procedural_material_async(
         material.base_color_texture = Some(handles.albedo.clone());
         material.normal_map_texture = Some(handles.normal.clone());
         material.metallic_roughness_texture = Some(handles.roughness.clone());
-        material.emissive_texture = handles.emissive.clone();
+        apply_emissive_map(&mut material, handles.emissive.clone());
         return materials.add(material);
     }
 
@@ -416,10 +454,10 @@ pub fn patch_procedural_material_textures(
                     mat.base_color_texture = Some(handles.albedo);
                     mat.normal_map_texture = Some(handles.normal);
                     mat.metallic_roughness_texture = Some(handles.roughness);
-                    // The emissive map is multiplied by the material's
-                    // `emissive` colour factor — None clears any stale map
-                    // from a previous (animated) regeneration.
-                    mat.emissive_texture = handles.emissive;
+                    // Defaults the emissive factor to white when a glow map
+                    // is present (and undoes it when one is not), so the map
+                    // is visible without the caller configuring emission.
+                    apply_emissive_map(mat, handles.emissive);
                 }
                 commands.entity(entity).despawn();
             }
@@ -664,5 +702,123 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn dummy_image_handle() -> Handle<Image> {
+        Handle::<Image>::default()
+    }
+
+    #[test]
+    fn apply_emissive_map_auto_enables_white_for_a_glow_map() {
+        let mut mat = StandardMaterial::default();
+        assert_eq!(mat.emissive, LinearRgba::BLACK, "precondition");
+        apply_emissive_map(&mut mat, Some(dummy_image_handle()));
+        assert_eq!(
+            mat.emissive,
+            LinearRgba::WHITE,
+            "a glow map with the black default factor must auto-enable white"
+        );
+        assert!(mat.emissive_texture.is_some());
+    }
+
+    #[test]
+    fn apply_emissive_map_respects_a_caller_supplied_factor() {
+        let tint = LinearRgba::new(0.2, 0.4, 0.6, 1.0);
+        let mut mat = StandardMaterial {
+            emissive: tint,
+            ..Default::default()
+        };
+        apply_emissive_map(&mut mat, Some(dummy_image_handle()));
+        assert_eq!(
+            mat.emissive, tint,
+            "a non-default factor must be left alone"
+        );
+    }
+
+    #[test]
+    fn apply_emissive_map_undoes_auto_white_when_the_map_drops() {
+        // Simulate an animated regeneration: first a glow map (auto-white),
+        // then a frame with no emissive — the factor must reset so the whole
+        // surface does not emit white.
+        let mut mat = StandardMaterial::default();
+        apply_emissive_map(&mut mat, Some(dummy_image_handle()));
+        assert_eq!(mat.emissive, LinearRgba::WHITE);
+        apply_emissive_map(&mut mat, None);
+        assert_eq!(mat.emissive, LinearRgba::BLACK, "auto-white must be undone");
+        assert!(mat.emissive_texture.is_none());
+    }
+
+    /// End-to-end: a lava material built with default `MaterialSettings`
+    /// (no emission configured) must end up with both an emissive texture
+    /// and a non-black emissive factor after the patch system runs, so the
+    /// glow is actually visible.
+    #[test]
+    fn lava_glow_is_visible_with_default_material_settings() {
+        use crate::lava::LavaConfig;
+
+        let settings = MaterialSettings {
+            texture: TextureConfig::Lava(LavaConfig::default()),
+            ..MaterialSettings::default()
+        };
+        assert_eq!(settings.emission_strength, 0.0, "precondition: no emission");
+
+        let mut world = asset_world();
+        let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
+        let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+        let handle = build_procedural_material_async(
+            &mut commands,
+            &mut materials,
+            &mut images,
+            None,
+            &settings,
+            16,
+            16,
+        );
+        // Before generation finishes the factor's RGB is the unset (zero)
+        // default and no emissive map is present.
+        let before = materials.get(&handle).unwrap();
+        assert_eq!(
+            (
+                before.emissive.red,
+                before.emissive.green,
+                before.emissive.blue
+            ),
+            (0.0, 0.0, 0.0)
+        );
+        assert!(before.emissive_texture.is_none());
+        state.apply(&mut world);
+
+        let mut schedule = bevy::ecs::schedule::Schedule::default();
+        schedule.add_systems(patch_procedural_material_textures);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            schedule.run(&mut world);
+            let done = world
+                .resource::<Assets<StandardMaterial>>()
+                .get(&handle)
+                .is_some_and(|m| m.emissive_texture.is_some());
+            if done {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "lava generation timed out"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+
+        let mat = world
+            .resource::<Assets<StandardMaterial>>()
+            .get(&handle)
+            .unwrap();
+        assert!(
+            mat.emissive_texture.is_some(),
+            "lava must set an emissive map"
+        );
+        assert_eq!(
+            mat.emissive,
+            LinearRgba::WHITE,
+            "emissive factor must auto-default to white so the glow shows"
+        );
     }
 }
