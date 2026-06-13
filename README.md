@@ -2,25 +2,27 @@
 
 Procedural, tileable texture generation for [Bevy](https://bevyengine.org/).
 
-Generates albedo, normal, and roughness (ORM) maps entirely on the CPU — no
-asset files required. All surface textures are seamlessly tileable by
-construction via toroidal 4-D noise mapping. Alpha-masked card textures (leaf,
-twig, window, stained glass, iron grille) produce per-pixel transparency and
-do not tile. Sprite-atlas generators (soft disc, spark, snowflake, puff, ring,
-petal, shard) bake alpha-silhouette particle-billboard sheets where every
-atlas cell is a per-cell-seeded variant of the same config.
+Generates albedo, normal, roughness (ORM), and optional emissive maps
+entirely on the CPU — no asset files required. Generation is multi-core
+(rows are produced in parallel) and seamlessly tileable for all surface
+textures via toroidal 4-D noise mapping. Alpha-masked card textures (leaf,
+twig, window, stained glass, iron grille, chain-link, log-end) produce
+per-pixel transparency and do not tile. Sprite-atlas generators (soft disc,
+spark, snowflake, puff, ring, petal, shard, leaf sprite, flame, flower) bake
+alpha-silhouette particle-billboard sheets where every atlas cell is a
+per-cell-seeded variant of the same config.
 
 ## Bevy compatibility
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.4 – 0.5            | 0.18 |
+| 0.4 – 0.6            | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.5"
+bevy_symbios_texture = "0.6"
 ```
 
 The optional `egui` feature adds editor widgets for every config type
@@ -28,8 +30,35 @@ The optional `egui` feature adds editor widgets for every config type
 
 ```toml
 [dependencies]
-bevy_symbios_texture = { version = "0.5", features = ["egui"] }
+bevy_symbios_texture = { version = "0.6", features = ["egui"] }
 ```
+
+## Migrating from 0.5 to 0.6
+
+0.6 adds ten new generators (fabric, sand, snow, ice, lava, leaf_sprite,
+flame, flower, chain_link, log_end) plus hammered and diamond-plate metal
+styles, and parallelises generation across cores.  The breaking changes:
+
+* **`TextureMap` gained fields.** It now carries `emissive: Option<Vec<u8>>`
+  and `mip_level_count: u32` in addition to the three pixel buffers.  Code
+  that constructs `TextureMap` literals must add these (`emissive: None`,
+  `mip_level_count: 1` for a freshly generated base level).  `GeneratedHandles`
+  likewise gained `emissive: Option<Handle<Image>>`.
+* **Mipmaps are computed on the worker thread.** Async generation now returns
+  a `TextureMap` with the full chain already appended; `map_to_images`
+  computes it on demand only when absent, so most callers need no change.
+* **`generate_atlas` and `sample_grid`/`sample_grid_into` gained `Sync`
+  bounds** to enable row-parallel generation.  Custom `SpriteCell` types and
+  4-D noise functions must be `Sync` (they already are in practice).
+* **Cache identity changed.** Fingerprints are now a structural hash of the
+  config (stable across Rust versions and platforms) rather than a hash of
+  the `Debug` string, and `FileStore` blobs use on-disk format v3 with
+  `manifest_version` mixed into the key.  Existing `FileStore` caches are
+  invalidated once and rebuild automatically.
+* **Accepted visual drift.** Bark and marble warp layers now use a separate
+  `warp_octaves` field (default 3) instead of the base `octaves`, so default
+  output shifts slightly.  Configs serialised before 0.6 still deserialise
+  (the field defaults to 3).
 
 ## Quick start
 
@@ -383,15 +412,17 @@ let config = ConcreteConfig {
 
 #### Metal
 
-Brushed-metal (anisotropic FBM scratches) or standing-seam roof panels, with
-optional rust-patch weathering.
+Brushed metal (anisotropic FBM scratches), standing-seam roof panels,
+hand-hammered dimples, or diamond tread plate — all with optional rust-patch
+weathering.  For `Hammered` and `DiamondPlate`, `scale` sets the dimple /
+stud count across the tile.
 
 ```rust
 use bevy_symbios_texture::metal::{MetalConfig, MetalStyle};
 
 let config = MetalConfig {
     seed: 31,
-    style: MetalStyle::Brushed, // or MetalStyle::StandingSeam
+    style: MetalStyle::Brushed, // or StandingSeam, Hammered, DiamondPlate
     scale: 6.0,
     seam_count: 6.0,      // StandingSeam: number of ridges across the tile
     seam_sharpness: 2.5,  // StandingSeam: 0.5 = sinusoidal, 4.0 = sharp
@@ -597,6 +628,69 @@ let config = AsphaltConfig {
 };
 ```
 
+#### Sand
+
+Wind-rippled sand: a directional sine ridge field phase-warped by FBM so
+crests meander and merge, plus grain micro-relief and thresholded bright
+flecks (exposed sparkling grains read as local smooth spots in the ORM).
+
+```rust
+use bevy_symbios_texture::sand::SandConfig;
+
+let config = SandConfig {
+    seed: 91,
+    ripple_count: 10.0,    // crests across the tile [4, 24]
+    ripple_warp: 0.6,      // crest meander strength [0, 1.5]
+    grain_density: 0.12,   // bright-fleck density [0, 0.5]
+    grain_scale: 24.0,     // grain noise frequency [8, 48]
+    color_crest: [0.86, 0.74, 0.52],
+    color_trough: [0.62, 0.50, 0.34],
+    normal_strength: 2.5,
+};
+```
+
+#### Snow
+
+Wind-drifted snow: soft FBM relief with a cool shadow tint in the troughs
+and thresholded sparkle flecks — crystals that brighten the albedo and drop
+ORM roughness to near zero for specular glints.
+
+```rust
+use bevy_symbios_texture::snow::SnowConfig;
+
+let config = SnowConfig {
+    seed: 73,
+    drift_scale: 2.5,      // drift relief scale [1, 6]
+    drift_octaves: 4,      // FBM octaves [2, 6]
+    sparkle_density: 0.08, // glinting-crystal density [0, 0.5]
+    crust_roughness: 0.85, // base crust roughness [0.5, 1]
+    color_snow: [0.93, 0.95, 0.99],
+    color_shadow: [0.62, 0.70, 0.86],  // cool trough tint
+    normal_strength: 1.8,
+};
+```
+
+#### Ice
+
+Polished lake ice: a near-mirror pale-blue base crossed by thin recessed
+crack veins (sinusoidal bands over FBM contours), with frost patches that
+whiten the colour and raise roughness toward matte.
+
+```rust
+use bevy_symbios_texture::ice::IceConfig;
+
+let config = IceConfig {
+    seed: 117,
+    scale: 3.0,            // pattern scale [1, 8]
+    crack_density: 4.0,    // vein frequency [1, 8]
+    vein_sharpness: 7.0,   // crack narrowing exponent [2, 12]
+    frost_level: 0.25,     // matte frost coverage [0, 1]
+    color_ice: [0.72, 0.84, 0.94],
+    color_crack: [0.30, 0.44, 0.62],
+    normal_strength: 1.5,
+};
+```
+
 #### Wainscoting
 
 Wood-panel wainscoting with recessed panel faces, rail/stile framing, and
@@ -616,6 +710,27 @@ let config = WainscotingConfig {
     color_wood_light: [0.65, 0.44, 0.20],
     color_wood_dark: [0.28, 0.16, 0.07],
     normal_strength: 4.0,
+};
+```
+
+#### Fabric
+
+Plain-weave cloth: perpendicular warp/weft threads as half-cylinder
+profiles, over/under crossing relief, fibre fuzz, and yarn-mottle tinting.
+Match the two colours for solid cloth or contrast them for two-tone weaves.
+
+```rust
+use bevy_symbios_texture::fabric::FabricConfig;
+
+let config = FabricConfig {
+    seed: 29,
+    thread_count: 24.0,    // threads per tile edge [8, 64]
+    thread_width: 0.85,    // thread width as cell fraction [0.3, 0.98]
+    weave_contrast: 0.6,   // over/under relief depth [0, 1]
+    fuzz: 0.35,            // fibre fuzz strength [0, 1]
+    color_warp: [0.55, 0.36, 0.24],  // vertical threads
+    color_weft: [0.62, 0.44, 0.30],  // horizontal threads
+    normal_strength: 3.0,
 };
 ```
 
@@ -775,6 +890,73 @@ let config = IronGrilleConfig {
     color_iron: [0.14, 0.13, 0.13],
     color_rust: [0.42, 0.22, 0.08],
     normal_strength: 3.5,
+};
+```
+
+#### Chain-Link
+
+A woven diamond wire mesh: two cylindrical wire families at ±45° with
+over/under crossing relief and rust pooling at the joints.  Transparent
+between the wires.
+
+```rust
+use bevy_symbios_texture::chain_link::ChainLinkConfig;
+
+let config = ChainLinkConfig {
+    seed: 83,
+    cell_count: 8.0,       // diamond cells across the card [4, 16]
+    wire_radius: 0.07,     // wire radius in lattice units [0.02, 0.2]
+    weave_depth: 0.6,      // over/under relief [0, 1]
+    rust_level: 0.2,       // crossing rust [0, 1]
+    color_wire: [0.62, 0.64, 0.66],
+    color_rust: [0.45, 0.24, 0.10],
+    normal_strength: 3.0,
+};
+```
+
+#### Log End
+
+The sawn end of a log: irregular round silhouette, FBM-wobbled concentric
+growth rings, optional radial drying cracks, and a streaked bark rim.
+Completes the wood set alongside `bark` and `plank`.
+
+```rust
+use bevy_symbios_texture::log_end::LogEndConfig;
+
+let config = LogEndConfig {
+    seed: 7,
+    ring_count: 14.0,      // growth rings [4, 30]
+    ring_warp: 0.35,       // ring wobble [0, 1]
+    ring_contrast: 1.8,    // latewood band sharpness [0.5, 4]
+    crack_count: 5.0,      // radial drying cracks [0, 12]; 0 = none
+    bark_width: 0.07,      // bark rim thickness [0.02, 0.2]
+    color_early: [0.78, 0.62, 0.42],
+    color_late: [0.48, 0.33, 0.18],
+    color_bark: [0.30, 0.20, 0.12],
+    normal_strength: 2.5,
+};
+```
+
+#### Lava
+
+Cooling lava: dark basalt plates from a toroidal Voronoi decomposition,
+separated by molten cracks that drive the **emissive map** — the glow colour
+ramps with crack depth and is written to `StandardMaterial::emissive_texture`.
+Set `MaterialSettings::emission_color` to white and `emission_strength` above
+zero, or the glow is multiplied away.
+
+```rust
+use bevy_symbios_texture::lava::LavaConfig;
+
+let config = LavaConfig {
+    seed: 666,
+    plate_scale: 6.0,        // crust plates across the tile [3, 12]
+    crack_width: 0.14,       // molten-crack width [0.02, 0.3]
+    glow_falloff: 1.6,       // glow concentration exponent [0.5, 4]
+    color_crust: [0.08, 0.07, 0.07],
+    color_glow: [1.0, 0.45, 0.06],
+    emissive_intensity: 1.0, // glow multiplier [0, 4]
+    normal_strength: 4.0,
 };
 ```
 
@@ -976,6 +1158,76 @@ let config = ShardConfig {
 };
 ```
 
+#### Flame
+
+A single tongue of fire: a teardrop envelope displaced by fractal
+turbulence that grows toward the tip, with a core→mid→tip colour ramp.
+Per-variant cells jitter lean, elongation, and turbulence phase, so random
+atlas frames read as flicker.  Pairs well with additive blending.
+
+```rust
+use bevy_symbios_texture::flame::FlameConfig;
+
+let config = FlameConfig {
+    seed: 0,
+    variant_rows: 2,       // atlas rows [1, 16]
+    variant_cols: 2,       // atlas columns [1, 16]
+    elongation: 1.6,       // vertical stretch [1, 3]; taller = lazier wisp
+    turbulence: 0.55,      // tip displacement strength [0, 1.5]
+    lean_jitter: 0.25,     // max per-variant sideways lean [0, 0.5]
+    falloff: 1.6,          // envelope fade exponent [0.5, 4]
+    color_core: [1.0, 0.97, 0.78],  // hot base
+    color_mid: [1.0, 0.55, 0.10],
+    color_tip: [0.85, 0.16, 0.02],  // cool fringe
+    normal_strength: 1.0,
+};
+```
+
+#### Flower
+
+A radially composed blossom: petal blades (the petal sampler re-aimed
+outward) under a domed, stamen-dotted centre disc — the sprite counterpart
+of how `twig` composites leaves.  Every petal in every variant draws its
+own jitter stream.
+
+```rust
+use bevy_symbios_texture::flower::FlowerConfig;
+use bevy_symbios_texture::petal::PetalConfig;
+
+let config = FlowerConfig {
+    seed: 0,
+    variant_rows: 2,       // atlas rows [1, 16]
+    variant_cols: 2,       // atlas columns [1, 16]
+    petal: PetalConfig::default(), // shared blade appearance
+    petal_count: 6,        // blades [4, 12]
+    center_radius: 0.14,   // centre disc radius [0.05, 0.3]
+    center_color: [0.96, 0.78, 0.25],
+    dot_density: 0.5,      // stamen dots [0, 1]
+    normal_strength: 1.5,
+};
+```
+
+#### Leaf Sprite
+
+The atlas counterpart of the single-leaf foliage card: every cell bakes a
+per-cell-seeded leaf variant with bounded jitter on serration, lobes, vein
+count, and a green-preserving colour tint.  Falling-foliage particle
+systems get per-particle leaf variety from one bake.
+
+```rust
+use bevy_symbios_texture::leaf::LeafConfig;
+use bevy_symbios_texture::leaf_sprite::LeafSpriteConfig;
+
+let config = LeafSpriteConfig {
+    seed: 0,
+    variant_rows: 2,       // atlas rows [1, 16]
+    variant_cols: 2,       // atlas columns [1, 16]
+    leaf: LeafConfig::default(), // base leaf appearance for every cell
+    shape_jitter: 0.5,     // silhouette jitter [0, 1]
+    tint_jitter: 0.25,     // colour tint jitter [0, 1]
+};
+```
+
 ## Evolutionary parameter search (genetics)
 
 All config types implement `symbios_genetics::Genotype`, making them
@@ -1006,7 +1258,7 @@ declarative macros (`impl_genotype!` / `impl_config_editor!`) rather than
 hand-written per-config boilerplate.  Each macro invocation declares the
 config struct, field kinds (seed, f64, colour, enum, etc.), and optional
 post-hooks for tiling-invariant fixups, keeping the per-config call site
-small while covering all 30 config types.
+small while covering all 40 config types.
 
 `TextureConfig` itself also implements `Genotype` (mutation delegates to the
 wrapped config; crossover recombines like variants field-wise) and exposes
@@ -1041,6 +1293,11 @@ TextureGenerator (trait)
     ├── AsphaltGenerator    ─── ToroidalNoise FBM × 3 (macro/micro/aggregate)
     ├── WainscotingGenerator─── ToroidalNoise grain FBM + panel margin SDF
     ├── EncausticGenerator  ─── ToroidalNoise glaze FBM + geometric pattern SDF
+    ├── FabricGenerator     ─── perpendicular thread lattice + over/under weave
+    ├── SandGenerator       ─── warped sine ripples + grain flecks
+    ├── SnowGenerator       ─── FBM drift relief + sparkle flecks
+    ├── IceGenerator        ─── sinusoidal crack veins + frost patches
+    ├── LavaGenerator       ─── toroidal Voronoi plates + emissive crack glow
     │
     │  Alpha-masked cards
     ├── LeafGenerator       ─── LeafSampler (silhouette + venation)
@@ -1048,6 +1305,8 @@ TextureGenerator (trait)
     ├── WindowGenerator     ─── rounded-box SDF frame/mullions + FBM grime
     ├── StainedGlassGenerator── toroidal Voronoi + lead came SDF + grime FBM
     ├── IronGrilleGenerator ─── bar SDF grid + joint rust FBM
+    ├── ChainLinkGenerator  ─── diagonal wire lattice + over/under weave
+    ├── LogEndGenerator     ─── warped concentric rings + bark rim
     │
     │  Sprite atlases (alpha-masked cards, via sprite::generate_atlas)
     ├── SoftDiscGenerator   ─── radial-falloff disc (core + halo)
@@ -1056,7 +1315,10 @@ TextureGenerator (trait)
     ├── PuffGenerator       ─── domain-warped FBM blob + radial mask
     ├── RingGenerator       ─── soft annulus + angular waviness
     ├── PetalGenerator      ─── obovate blade + throat/edge gradient
-    └── ShardGenerator      ─── jittered polygon chip + grain FBM
+    ├── ShardGenerator      ─── jittered polygon chip + grain FBM
+    ├── LeafSpriteGenerator ─── LeafSampler atlas (per-cell leaf variants)
+    ├── FlameGenerator      ─── teardrop envelope + FBM turbulence
+    └── FlowerGenerator     ─── PetalCell × N (radial composite blossom)
                                 │
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
@@ -1074,12 +1336,15 @@ TextureGenerator (trait)
 (`Fbm<Perlin>`, `RidgedMulti<Perlin>`, `ToroidalNoise<…>`) once in `new()`
 and store them as struct fields.  Calling `generate()` multiple times (e.g.
 to produce size variants of the same material) skips the initialisation cost.
-`Worley` is the exception: it contains an `Rc` and is therefore `!Send`, so
-the generators that use it (`BarkGenerator`, `PlankGenerator`) construct it
-inside `generate()` to keep the struct `Send` for async tasks.  The foliage
-cards (`LeafGenerator`, `TwigGenerator` — leaf sampling also uses Worley) and
-the sprite generators hold only their config and build their samplers per
-`generate()` call.
+`Worley` is the exception: it contains an `Rc` and is therefore `!Send` /
+`!Sync`, so the generators that use it (`BarkGenerator`, `PlankGenerator`)
+construct it locally — and, since generation is row-parallel, once per row
+inside the parallel loop (the construction cost is microseconds against the
+per-row pixel work).  The foliage cards (`LeafGenerator`, `TwigGenerator` —
+leaf sampling also uses Worley) and the sprite generators hold only their
+config and build their samplers per `generate()` call.  The cell-decomposition
+surfaces (`CobblestoneGenerator`, `LavaGenerator`) instead use a dependency-free,
+`Sync` hash-based toroidal Voronoi (`noise::toroidal_voronoi`).
 
 **Workspace buffer pooling** — generators that allocate large intermediate
 grids (e.g. `BarkGenerator`, `ThatchGenerator`) accept an optional
@@ -1138,7 +1403,7 @@ Displays an interactive material viewer with three columns: **albedo** (left),
 material applied.  Tileable surface textures are shown on a spinning cube;
 alpha-masked cards and sprite atlases get a gently swaying alpha-blended quad
 in front of a checkerboard backdrop instead, so per-pixel alpha is visible.
-An egui panel on the left lets you select any of the 30 generators from a
+An egui panel on the left lets you select any of the 40 generators from a
 dropdown, trigger a random **Mutate** (rate = 0.3), and edit every parameter
 live.
 

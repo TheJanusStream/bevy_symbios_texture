@@ -79,7 +79,7 @@ impl Default for PetalConfig {
 }
 
 /// One baked petal variant.
-struct PetalCell {
+pub(crate) struct PetalCell {
     config: PetalConfig,
     length: f64,
     width: f64,
@@ -93,7 +93,7 @@ struct PetalCell {
 }
 
 impl PetalCell {
-    fn new(config: &PetalConfig, cell: usize) -> Self {
+    pub(crate) fn new(config: &PetalConfig, cell: usize) -> Self {
         let mut rng = CellRng::new(config.seed, cell);
         let peak = config.peak.clamp(0.3, 0.9);
         Self {

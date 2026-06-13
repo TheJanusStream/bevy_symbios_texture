@@ -4,20 +4,23 @@
 //!
 //! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
 //! metal, shingle, pavers, stucco, ashlar, cobblestone, thatch, marble,
-//! corrugated, asphalt, wainscoting, encaustic): wrap seamlessly via toroidal
-//! 4-D noise mapping.  Upload with [`map_to_images`] to get repeat-wrapping
+//! corrugated, asphalt, wainscoting, encaustic, fabric, sand, snow, ice,
+//! lava): wrap seamlessly via toroidal 4-D noise mapping.  Upload with
+//! [`map_to_images`] to get repeat-wrapping samplers.  `lava` additionally
+//! produces an emissive (glow) map.
+//!
+//! **Alpha-masked cards** (leaf, twig, window, stained_glass, iron_grille,
+//! chain_link, log_end): produce silhouettes with per-pixel alpha that must
+//! not tile.  Upload with [`map_to_images_card`] to get clamp-to-edge
 //! samplers.
 //!
-//! **Alpha-masked cards** (leaf, twig, window, stained_glass, iron_grille):
-//! produce silhouettes with per-pixel alpha that must not tile.  Upload with
-//! [`map_to_images_card`] to get clamp-to-edge samplers.
-//!
 //! **Sprite atlases** (soft_disc, spark, snowflake, puff, ring, petal,
-//! shard): alpha-silhouette cards aimed at particle billboards.  Each can
-//! bake a `variant_rows × variant_cols` atlas where every cell renders a
-//! per-cell-seeded variant of the same config — one bake gives a particle
-//! system per-particle shape variety via random atlas frames.  Shared
-//! conventions live in [`sprite`]; upload with [`map_to_images_card`].
+//! shard, leaf_sprite, flame, flower): alpha-silhouette cards aimed at
+//! particle billboards.  Each can bake a `variant_rows × variant_cols`
+//! atlas where every cell renders a per-cell-seeded variant of the same
+//! config — one bake gives a particle system per-particle shape variety via
+//! random atlas frames.  Shared conventions live in [`sprite`]; upload with
+//! [`map_to_images_card`].
 //!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
@@ -64,17 +67,25 @@ pub mod async_gen;
 pub mod bark;
 pub mod brick;
 pub mod cache;
+pub mod chain_link;
 pub mod cobblestone;
 pub mod concrete;
 pub mod corrugated;
 pub mod curve;
 pub mod encaustic;
+pub mod fabric;
 pub(crate) mod fingerprint;
+pub mod flame;
+pub mod flower;
 pub mod generator;
 pub mod genetics;
 pub mod ground;
+pub mod ice;
 pub mod iron_grille;
+pub mod lava;
 pub mod leaf;
+pub mod leaf_sprite;
+pub mod log_end;
 pub mod marble;
 pub mod material;
 pub mod metal;
@@ -87,8 +98,10 @@ pub mod puff;
 pub(crate) mod registry;
 pub mod ring;
 pub mod rock;
+pub mod sand;
 pub mod shard;
 pub mod shingle;
+pub mod snow;
 pub mod snowflake;
 pub mod soft_disc;
 pub mod spark;

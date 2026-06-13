@@ -175,6 +175,77 @@ pub fn bilinear_sample_torus(grid: &[f64], w: usize, h: usize, u: f64, v: f64) -
     v00 * (1.0 - fx) * (1.0 - fy) + v10 * fx * (1.0 - fy) + v01 * (1.0 - fx) * fy + v11 * fx * fy
 }
 
+/// Grid-based toroidal Voronoi in UV space.
+///
+/// Partitions `[0, 1]²` into `scale × scale` candidate cells and searches a
+/// 5×5 neighbourhood around the query point, wrapping toroidally.  Returns
+/// `(F1, F2, best_i, best_j)` where F1/F2 are the two nearest site distances
+/// in UV units and `(best_i, best_j)` is the integer cell coordinate of the
+/// F1 site.  Shared by the cell-decomposition generators (cobblestone,
+/// lava).
+pub(crate) fn toroidal_voronoi(u: f64, v: f64, scale: f64, seed: u32) -> (f64, f64, i64, i64) {
+    let n = scale.round().max(1.0) as i64;
+    let su = u * scale;
+    let sv = v * scale;
+    let gi = su.floor() as i64;
+    let gj = sv.floor() as i64;
+
+    let mut f1 = f64::MAX;
+    let mut f2 = f64::MAX;
+    let mut best_i = gi;
+    let mut best_j = gj;
+
+    for di in -2i64..=2 {
+        for dj in -2i64..=2 {
+            let ni = (gi + di).rem_euclid(n);
+            let nj = (gj + dj).rem_euclid(n);
+
+            // Jitter: the site is placed within [0.15, 0.85] of its cell to
+            // avoid degenerate near-zero-area cells at the lattice corners.
+            let jx = 0.15 + 0.70 * cell_hash(ni, nj, seed);
+            let jy = 0.15 + 0.70 * cell_hash(nj, ni, seed.wrapping_add(17));
+
+            // Site position in UV space.
+            let cx = (ni as f64 + jx) / scale;
+            let cy = (nj as f64 + jy) / scale;
+
+            // Toroidal distance.
+            let mut dx = (u - cx).abs();
+            let mut dy = (v - cy).abs();
+            if dx > 0.5 {
+                dx = 1.0 - dx;
+            }
+            if dy > 0.5 {
+                dy = 1.0 - dy;
+            }
+            let d = (dx * dx + dy * dy).sqrt();
+
+            if d < f1 {
+                f2 = f1;
+                f1 = d;
+                best_i = ni;
+                best_j = nj;
+            } else if d < f2 {
+                f2 = d;
+            }
+        }
+    }
+
+    (f1, f2, best_i, best_j)
+}
+
+/// Deterministic integer hash → \[0, 1\].  Drives Voronoi site jitter and
+/// per-cell variance for the cell-decomposition generators.
+pub(crate) fn cell_hash(bx: i64, by: i64, seed: u32) -> f64 {
+    let mut h = seed as u64;
+    h ^= (bx as u64).wrapping_mul(6_364_136_223_846_793_005);
+    h ^= (by as u64).wrapping_mul(1_442_695_040_888_963_407);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    (h as f64) * (1.0 / u64::MAX as f64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

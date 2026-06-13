@@ -32,13 +32,21 @@ use crate::ashlar::AshlarConfig;
 use crate::asphalt::AsphaltConfig;
 use crate::bark::BarkConfig;
 use crate::brick::BrickConfig;
+use crate::chain_link::ChainLinkConfig;
 use crate::cobblestone::CobblestoneConfig;
 use crate::concrete::ConcreteConfig;
 use crate::corrugated::CorrugatedConfig;
 use crate::encaustic::{EncausticConfig, EncausticPattern};
+use crate::fabric::FabricConfig;
+use crate::flame::FlameConfig;
+use crate::flower::FlowerConfig;
 use crate::ground::GroundConfig;
+use crate::ice::IceConfig;
 use crate::iron_grille::IronGrilleConfig;
+use crate::lava::LavaConfig;
 use crate::leaf::LeafConfig;
+use crate::leaf_sprite::LeafSpriteConfig;
+use crate::log_end::LogEndConfig;
 use crate::marble::MarbleConfig;
 use crate::metal::{MetalConfig, MetalStyle};
 use crate::pavers::{PaversConfig, PaversLayout};
@@ -47,8 +55,10 @@ use crate::plank::PlankConfig;
 use crate::puff::PuffConfig;
 use crate::ring::RingConfig;
 use crate::rock::RockConfig;
+use crate::sand::SandConfig;
 use crate::shard::ShardConfig;
 use crate::shingle::ShingleConfig;
+use crate::snow::SnowConfig;
 use crate::snowflake::SnowflakeConfig;
 use crate::soft_disc::SoftDiscConfig;
 use crate::spark::SparkConfig;
@@ -198,6 +208,150 @@ impl_config_editor!(
         slider("Stem Curve", stem_curve, 0.0..=0.15),
         bool("Sympodial", sympodial),
         nested(leaf_config_editor, leaf, "twig_leaf"),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`LogEndConfig`] parameters inside a collapsing header.
+    fn log_end_config_editor, LogEndConfig, "Log End Config" => {
+        u32("Seed", seed),
+        slider("Ring Count", ring_count, 4.0..=30.0),
+        slider("Ring Warp", ring_warp, 0.0..=1.0),
+        slider("Ring Contrast", ring_contrast, 0.5..=4.0),
+        slider("Crack Count", crack_count, 0.0..=12.0),
+        slider("Bark Width", bark_width, 0.02..=0.2),
+        color("Earlywood", color_early),
+        color("Latewood", color_late),
+        color("Bark", color_bark),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ChainLinkConfig`] parameters inside a collapsing header.
+    fn chain_link_config_editor, ChainLinkConfig, "Chain-Link Config" => {
+        u32("Seed", seed),
+        slider("Cell Count", cell_count, 4.0..=16.0),
+        slider("Wire Radius", wire_radius, 0.02..=0.2),
+        slider("Weave Depth", weave_depth, 0.0..=1.0),
+        slider("Rust Level", rust_level, 0.0..=1.0),
+        color("Wire Color", color_wire),
+        color("Rust Color", color_rust),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`LavaConfig`] parameters inside a collapsing header.
+    fn lava_config_editor, LavaConfig, "Lava Config" => {
+        u32("Seed", seed),
+        slider("Plate Scale", plate_scale, 3.0..=12.0),
+        slider("Crack Width", crack_width, 0.02..=0.3),
+        slider("Glow Falloff", glow_falloff, 0.5..=4.0),
+        color("Crust Color", color_crust),
+        color("Glow Color", color_glow),
+        slider("Emissive Intensity", emissive_intensity, 0.0..=4.0),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`IceConfig`] parameters inside a collapsing header.
+    fn ice_config_editor, IceConfig, "Ice Config" => {
+        u32("Seed", seed),
+        slider("Scale", scale, 1.0..=8.0),
+        slider("Crack Density", crack_density, 1.0..=8.0),
+        slider("Vein Sharpness", vein_sharpness, 2.0..=12.0),
+        slider("Frost Level", frost_level, 0.0..=1.0),
+        color("Ice Color", color_ice),
+        color("Crack Color", color_crack),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`SnowConfig`] parameters inside a collapsing header.
+    fn snow_config_editor, SnowConfig, "Snow Config" => {
+        u32("Seed", seed),
+        slider("Drift Scale", drift_scale, 1.0..=6.0),
+        usize("Drift Octaves", drift_octaves, 2..=6),
+        slider("Sparkle Density", sparkle_density, 0.0..=0.5),
+        slider("Crust Roughness", crust_roughness, 0.5..=1.0),
+        color("Snow Color", color_snow),
+        color("Shadow Color", color_shadow),
+        slider("Normal Strength", normal_strength, 0.5..=5.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`SandConfig`] parameters inside a collapsing header.
+    fn sand_config_editor, SandConfig, "Sand Config" => {
+        u32("Seed", seed),
+        slider("Ripple Count", ripple_count, 4.0..=24.0),
+        slider("Ripple Warp", ripple_warp, 0.0..=1.5),
+        slider("Grain Density", grain_density, 0.0..=0.5),
+        slider("Grain Scale", grain_scale, 8.0..=48.0),
+        color("Crest Color", color_crest),
+        color("Trough Color", color_trough),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`FabricConfig`] parameters inside a collapsing header.
+    fn fabric_config_editor, FabricConfig, "Fabric Config" => {
+        u32("Seed", seed),
+        slider("Thread Count", thread_count, 8.0..=64.0),
+        slider("Thread Width", thread_width, 0.3..=0.98),
+        slider("Weave Contrast", weave_contrast, 0.0..=1.0),
+        slider("Fuzz", fuzz, 0.0..=1.0),
+        color("Warp Color", color_warp),
+        color("Weft Color", color_weft),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`FlowerConfig`] parameters inside a collapsing header.
+    fn flower_config_editor, FlowerConfig, "Flower Config" => {
+        u32("Seed", seed),
+        usize("Atlas Rows", variant_rows, 1..=16),
+        usize("Atlas Cols", variant_cols, 1..=16),
+        usize("Petal Count", petal_count, 4..=12),
+        slider("Center Radius", center_radius, 0.05..=0.3),
+        color("Center Color", center_color),
+        slider("Dot Density", dot_density, 0.0..=1.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+        nested(petal_config_editor, petal, "flower_petal"),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`FlameConfig`] parameters inside a collapsing header.
+    fn flame_config_editor, FlameConfig, "Flame Config" => {
+        u32("Seed", seed),
+        usize("Atlas Rows", variant_rows, 1..=16),
+        usize("Atlas Cols", variant_cols, 1..=16),
+        slider("Elongation", elongation, 1.0..=3.0),
+        slider("Turbulence", turbulence, 0.0..=1.5),
+        slider("Lean Jitter", lean_jitter, 0.0..=0.5),
+        slider("Falloff", falloff, 0.5..=4.0),
+        color("Core Color", color_core),
+        color("Mid Color", color_mid),
+        color("Tip Color", color_tip),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`LeafSpriteConfig`] parameters inside a collapsing header.
+    fn leaf_sprite_config_editor, LeafSpriteConfig, "Leaf Sprite Config" => {
+        u32("Seed", seed),
+        usize("Atlas Rows", variant_rows, 1..=16),
+        usize("Atlas Cols", variant_cols, 1..=16),
+        slider("Shape Jitter", shape_jitter, 0.0..=1.0),
+        slider("Tint Jitter", tint_jitter, 0.0..=1.0),
+        nested(leaf_config_editor, leaf, "leaf_sprite_leaf"),
     }
 );
 
@@ -353,7 +507,9 @@ impl_config_editor!(
         u32("Seed", seed),
         enum_select("Style:", style, [
             ("Brushed", MetalStyle::Brushed),
-            ("Standing Seam", MetalStyle::StandingSeam)
+            ("Standing Seam", MetalStyle::StandingSeam),
+            ("Hammered", MetalStyle::Hammered),
+            ("Diamond Plate", MetalStyle::DiamondPlate)
         ]),
         slider("Scale", scale, 1.0..=16.0),
         slider_step("Seam Count", seam_count, 1.0..=16.0, 1.0),
@@ -671,12 +827,6 @@ impl_config_editor!(
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-/// Adds a slider with drag-aware debouncing.
-///
-/// - `writeback` accumulates on any `changed()` (including mid-drag) so the
-///   caller can write the value back and prevent visual snap-back.
-/// - `regen` accumulates only on `drag_stopped()` or a non-drag change, avoiding
-///   unnecessary texture regeneration during continuous slider drags.
 /// Renders the editor for whichever generator `cfg` currently wraps.
 ///
 /// Returns the same `(changed, regen)` pair as the per-config editors.
@@ -722,9 +872,25 @@ pub fn texture_config_editor(
         TC::Ring(c) => ring_config_editor(ui, c, id),
         TC::Petal(c) => petal_config_editor(ui, c, id),
         TC::Shard(c) => shard_config_editor(ui, c, id),
+        TC::LeafSprite(c) => leaf_sprite_config_editor(ui, c, id),
+        TC::Flame(c) => flame_config_editor(ui, c, id),
+        TC::Flower(c) => flower_config_editor(ui, c, id),
+        TC::Fabric(c) => fabric_config_editor(ui, c, id),
+        TC::Sand(c) => sand_config_editor(ui, c, id),
+        TC::Snow(c) => snow_config_editor(ui, c, id),
+        TC::Ice(c) => ice_config_editor(ui, c, id),
+        TC::Lava(c) => lava_config_editor(ui, c, id),
+        TC::ChainLink(c) => chain_link_config_editor(ui, c, id),
+        TC::LogEnd(c) => log_end_config_editor(ui, c, id),
     }
 }
 
+/// Adds a slider with drag-aware debouncing.
+///
+/// - `writeback` accumulates on any `changed()` (including mid-drag) so the
+///   caller can write the value back and prevent visual snap-back.
+/// - `regen` accumulates only on `drag_stopped()` or a non-drag change, avoiding
+///   unnecessary texture regeneration during continuous slider drags.
 pub fn slider_debounced(
     ui: &mut egui::Ui,
     slider: impl egui::Widget,

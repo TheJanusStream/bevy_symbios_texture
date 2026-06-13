@@ -43,6 +43,8 @@ macro_rules! for_each_generator {
             (Window, window, crate::window::WindowConfig, crate::window::WindowGenerator, Card),
             (StainedGlass, stained_glass, crate::stained_glass::StainedGlassConfig, crate::stained_glass::StainedGlassGenerator, Card),
             (IronGrille, iron_grille, crate::iron_grille::IronGrilleConfig, crate::iron_grille::IronGrilleGenerator, Card),
+            (ChainLink, chain_link, crate::chain_link::ChainLinkConfig, crate::chain_link::ChainLinkGenerator, Card),
+            (LogEnd, log_end, crate::log_end::LogEndConfig, crate::log_end::LogEndGenerator, Card),
             (Ground, ground, crate::ground::GroundConfig, crate::ground::GroundGenerator, Surface),
             (Rock, rock, crate::rock::RockConfig, crate::rock::RockGenerator, Surface),
             (Brick, brick, crate::brick::BrickConfig, crate::brick::BrickGenerator, Surface),
@@ -60,6 +62,11 @@ macro_rules! for_each_generator {
             (Asphalt, asphalt, crate::asphalt::AsphaltConfig, crate::asphalt::AsphaltGenerator, Surface),
             (Wainscoting, wainscoting, crate::wainscoting::WainscotingConfig, crate::wainscoting::WainscotingGenerator, Surface),
             (Encaustic, encaustic, crate::encaustic::EncausticConfig, crate::encaustic::EncausticGenerator, Surface),
+            (Fabric, fabric, crate::fabric::FabricConfig, crate::fabric::FabricGenerator, Surface),
+            (Sand, sand, crate::sand::SandConfig, crate::sand::SandGenerator, Surface),
+            (Snow, snow, crate::snow::SnowConfig, crate::snow::SnowGenerator, Surface),
+            (Ice, ice, crate::ice::IceConfig, crate::ice::IceGenerator, Surface),
+            (Lava, lava, crate::lava::LavaConfig, crate::lava::LavaGenerator, Surface),
             (SoftDisc, soft_disc, crate::soft_disc::SoftDiscConfig, crate::soft_disc::SoftDiscGenerator, Card),
             (Spark, spark, crate::spark::SparkConfig, crate::spark::SparkGenerator, Card),
             (Snowflake, snowflake, crate::snowflake::SnowflakeConfig, crate::snowflake::SnowflakeGenerator, Card),
@@ -67,6 +74,9 @@ macro_rules! for_each_generator {
             (Ring, ring, crate::ring::RingConfig, crate::ring::RingGenerator, Card),
             (Petal, petal, crate::petal::PetalConfig, crate::petal::PetalGenerator, Card),
             (Shard, shard, crate::shard::ShardConfig, crate::shard::ShardGenerator, Card),
+            (LeafSprite, leaf_sprite, crate::leaf_sprite::LeafSpriteConfig, crate::leaf_sprite::LeafSpriteGenerator, Card),
+            (Flame, flame, crate::flame::FlameConfig, crate::flame::FlameGenerator, Card),
+            (Flower, flower, crate::flower::FlowerConfig, crate::flower::FlowerGenerator, Card),
         }
     };
 }

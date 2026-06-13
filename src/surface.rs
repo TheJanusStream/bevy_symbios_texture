@@ -47,6 +47,10 @@ pub struct SurfaceSample {
     pub metallic: f32,
     /// Ambient occlusion `[0, 1]` (ORM red channel).
     pub occlusion: f32,
+    /// Emissive (glow) colour in linear RGB `[0, 1]`.  Ignored by
+    /// [`generate_surface`]; collected into the texture map's emissive
+    /// channel by [`generate_surface_emissive`].
+    pub emissive: [f32; 3],
 }
 
 impl SurfaceSample {
@@ -60,6 +64,7 @@ impl SurfaceSample {
             roughness,
             metallic: 0.0,
             occlusion: 1.0,
+            emissive: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -108,8 +113,36 @@ pub fn generate_surface<C: SurfaceCell + Sync>(
     width: u32,
     height: u32,
     normal_strength: f32,
+    workspace: Option<&mut Workspace>,
+    cell: &C,
+) -> Result<TextureMap, TextureError> {
+    generate_surface_impl(width, height, normal_strength, workspace, cell, false)
+}
+
+/// [`generate_surface`] variant that also collects the per-sample
+/// [`emissive`](SurfaceSample::emissive) colour into the texture map's
+/// emissive channel (sRGB-encoded, like albedo).
+///
+/// Use this for glowing materials (lava, embers, neon); the polling systems
+/// assign the resulting map to `StandardMaterial::emissive_texture`, where
+/// it is multiplied by the material's emissive colour factor.
+pub fn generate_surface_emissive<C: SurfaceCell + Sync>(
+    width: u32,
+    height: u32,
+    normal_strength: f32,
+    workspace: Option<&mut Workspace>,
+    cell: &C,
+) -> Result<TextureMap, TextureError> {
+    generate_surface_impl(width, height, normal_strength, workspace, cell, true)
+}
+
+fn generate_surface_impl<C: SurfaceCell + Sync>(
+    width: u32,
+    height: u32,
+    normal_strength: f32,
     mut workspace: Option<&mut Workspace>,
     cell: &C,
+    emit: bool,
 ) -> Result<TextureMap, TextureError> {
     validate_dimensions(width, height)?;
 
@@ -125,32 +158,74 @@ pub fn generate_surface<C: SurfaceCell + Sync>(
 
     let mut albedo = vec![0u8; n * 4];
     let mut roughness = vec![0u8; n * 4];
+    let mut emissive = if emit { vec![0u8; n * 4] } else { Vec::new() };
 
-    heights
-        .par_chunks_mut(w)
-        .zip(albedo.par_chunks_mut(w * 4))
-        .zip(roughness.par_chunks_mut(w * 4))
-        .enumerate()
-        .for_each(|(y, ((height_row, albedo_row), orm_row))| {
-            let v = y as f64 / h as f64;
-            for (x, height_slot) in height_row.iter_mut().enumerate() {
-                let u = x as f64 / w as f64;
-                let s = cell.sample(x as u32, y as u32, u, v);
+    // Pack one sample into the albedo/ORM (and optional emissive) row slots.
+    // A closure (not a fn) so it captures `cell`/`w`/`h` and stays under the
+    // argument-count lint while serving both the emissive and plain paths.
+    let write_pixel = |x: usize,
+                       y: usize,
+                       height_slot: &mut f64,
+                       albedo_row: &mut [u8],
+                       orm_row: &mut [u8],
+                       emissive_px: Option<&mut [u8]>| {
+        let u = x as f64 / w as f64;
+        let v = y as f64 / h as f64;
+        let s = cell.sample(x as u32, y as u32, u, v);
 
-                *height_slot = s.height;
+        *height_slot = s.height;
 
-                let ai = x * 4;
-                albedo_row[ai] = linear_to_srgb(s.color[0]);
-                albedo_row[ai + 1] = linear_to_srgb(s.color[1]);
-                albedo_row[ai + 2] = linear_to_srgb(s.color[2]);
-                albedo_row[ai + 3] = 255;
+        let ai = x * 4;
+        albedo_row[ai] = linear_to_srgb(s.color[0]);
+        albedo_row[ai + 1] = linear_to_srgb(s.color[1]);
+        albedo_row[ai + 2] = linear_to_srgb(s.color[2]);
+        albedo_row[ai + 3] = 255;
 
-                orm_row[ai] = (s.occlusion.clamp(0.0, 1.0) * 255.0).round() as u8;
-                orm_row[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
-                orm_row[ai + 2] = (s.metallic.clamp(0.0, 1.0) * 255.0).round() as u8;
-                orm_row[ai + 3] = 255;
-            }
-        });
+        orm_row[ai] = (s.occlusion.clamp(0.0, 1.0) * 255.0).round() as u8;
+        orm_row[ai + 1] = (s.roughness.clamp(0.0, 1.0) * 255.0).round() as u8;
+        orm_row[ai + 2] = (s.metallic.clamp(0.0, 1.0) * 255.0).round() as u8;
+        orm_row[ai + 3] = 255;
+
+        if let Some(e) = emissive_px {
+            e[0] = linear_to_srgb(s.emissive[0]);
+            e[1] = linear_to_srgb(s.emissive[1]);
+            e[2] = linear_to_srgb(s.emissive[2]);
+            e[3] = 255;
+        }
+    };
+
+    if emit {
+        heights
+            .par_chunks_mut(w)
+            .zip(albedo.par_chunks_mut(w * 4))
+            .zip(roughness.par_chunks_mut(w * 4))
+            .zip(emissive.par_chunks_mut(w * 4))
+            .enumerate()
+            .for_each(|(y, (((height_row, albedo_row), orm_row), emissive_row))| {
+                for (x, height_slot) in height_row.iter_mut().enumerate() {
+                    let ai = x * 4;
+                    write_pixel(
+                        x,
+                        y,
+                        height_slot,
+                        albedo_row,
+                        orm_row,
+                        Some(&mut emissive_row[ai..ai + 4]),
+                    );
+                }
+            });
+    } else {
+        heights
+            .par_chunks_mut(w)
+            .zip(albedo.par_chunks_mut(w * 4))
+            .zip(roughness.par_chunks_mut(w * 4))
+            .enumerate()
+            .for_each(|(y, ((height_row, albedo_row), orm_row))| {
+                for (x, height_slot) in height_row.iter_mut().enumerate() {
+                    write_pixel(x, y, height_slot, albedo_row, orm_row, None);
+                }
+            });
+    }
 
     let normal = height_to_normal(&heights, width, height, normal_strength, BoundaryMode::Wrap);
 
@@ -165,7 +240,7 @@ pub fn generate_surface<C: SurfaceCell + Sync>(
         width,
         height,
         mip_level_count: 1,
-        emissive: None,
+        emissive: if emit { Some(emissive) } else { None },
     })
 }
 
@@ -192,6 +267,7 @@ mod tests {
                 roughness: 0.5,
                 metallic: 1.0,
                 occlusion: 0.0,
+                emissive: [0.0, 0.0, 0.0],
             }
         }
     }

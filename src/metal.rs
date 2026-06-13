@@ -26,6 +26,12 @@ pub enum MetalStyle {
     Brushed,
     /// Parallel raised ridges running across the tile (standing-seam roof).
     StandingSeam,
+    /// Peened surface of round overlapping dimple depressions (hand-hammered
+    /// sheet).  `scale` sets the dimple count across the tile.
+    Hammered,
+    /// Classic tread plate: a diamond lattice of raised oblong studs with
+    /// alternating orientation.  `scale` sets the stud count across the tile.
+    DiamondPlate,
 }
 
 /// Configures the appearance of a [`MetalGenerator`].
@@ -139,7 +145,7 @@ impl SurfaceCell for MetalCell<'_> {
         // Sample scratch noise.
         // Brushed: large radius in U (fast oscillations → many horizontal
         // scratches), small radius in V (slow → scratches run lengthwise).
-        // StandingSeam: uniform toroidal sampling for micro-detail.
+        // Other styles: uniform toroidal sampling for micro-detail.
         let scratch = match c.style {
             MetalStyle::Brushed => {
                 let nx = (TAU * u).cos() * c.scale * c.brush_stretch;
@@ -148,7 +154,7 @@ impl SurfaceCell for MetalCell<'_> {
                 let nw = (TAU * v).sin() * c.scale * 0.12;
                 self.fbm_scratch.get([nx, ny, nz, nw]) * 0.5 + 0.5
             }
-            MetalStyle::StandingSeam => {
+            MetalStyle::StandingSeam | MetalStyle::Hammered | MetalStyle::DiamondPlate => {
                 let nx = (TAU * u).cos() * c.scale;
                 let ny = (TAU * u).sin() * c.scale;
                 let nz = (TAU * v).cos() * c.scale;
@@ -168,6 +174,14 @@ impl SurfaceCell for MetalCell<'_> {
         let h_val = match c.style {
             MetalStyle::Brushed => h_scratch,
             MetalStyle::StandingSeam => seam_h * 0.7 + h_scratch * 0.3,
+            MetalStyle::Hammered => {
+                // Plateau between dimples at 1, dimple centres at 0.
+                let dimple = dimple_height(u, v, c.scale, c.seed);
+                (dimple * 0.8 + h_scratch * 0.2).clamp(0.0, 1.0)
+            }
+            MetalStyle::DiamondPlate => {
+                (0.35 + diamond_stud(u, v, c.scale) * 0.5 + h_scratch * 0.3).clamp(0.0, 1.0)
+            }
         };
 
         // Colour: lerp metal → rust.
@@ -187,6 +201,7 @@ impl SurfaceCell for MetalCell<'_> {
             roughness: rough,
             metallic: met,
             occlusion: 1.0,
+            emissive: [0.0, 0.0, 0.0],
         }
     }
 }
@@ -237,5 +252,138 @@ impl TextureGenerator for MetalGenerator {
         workspace: &mut Workspace,
     ) -> Result<TextureMap, TextureError> {
         self.generate_inner(width, height, Some(workspace))
+    }
+}
+
+// --- style helpers ------------------------------------------------------------
+
+/// Hammered dimple field: `1` on the plateau between dimples, falling to `0`
+/// at each dimple centre.  A jittered toroidal point grid (one dimple per
+/// cell, 3×3 neighbourhood search) keeps the pattern seamless.
+fn dimple_height(u: f64, v: f64, count: f64, seed: u32) -> f64 {
+    let n = count.round().max(1.0);
+    let gi = (u * n).floor() as i64;
+    let gj = (v * n).floor() as i64;
+
+    let mut best = f64::MAX;
+    for di in -1i64..=1 {
+        for dj in -1i64..=1 {
+            let ni = (gi + di).rem_euclid(n as i64);
+            let nj = (gj + dj).rem_euclid(n as i64);
+            // Keep centres away from cell borders so neighbouring dimples
+            // overlap without leaving flat seams.
+            let jx = 0.2 + 0.6 * cell_hash(ni, nj, seed);
+            let jy = 0.2 + 0.6 * cell_hash(nj, ni, seed.wrapping_add(13));
+            let cx = (ni as f64 + jx) / n;
+            let cy = (nj as f64 + jy) / n;
+
+            // Toroidal distance in cell units.
+            let mut dx = (u - cx).abs();
+            if dx > 0.5 {
+                dx = 1.0 - dx;
+            }
+            let mut dy = (v - cy).abs();
+            if dy > 0.5 {
+                dy = 1.0 - dy;
+            }
+            best = best.min((dx * dx + dy * dy).sqrt() * n);
+        }
+    }
+
+    // Spherical cap profile: depth 1 at the centre, flat beyond ~0.75 cells.
+    let t = (best / 0.75).min(1.0);
+    1.0 - (1.0 - t * t).max(0.0)
+}
+
+/// Diamond-plate stud field: `1` on a raised stud, `0` on the base plate.
+///
+/// The UV plane is sheared into diagonal lattice coordinates; each lattice
+/// cell carries one rounded-bar stud whose orientation alternates with cell
+/// parity.  Integer `scale` keeps both diagonal families tiling.
+fn diamond_stud(u: f64, v: f64, scale: f64) -> f64 {
+    let k = scale.round().max(1.0);
+    let s = (u + v) * k;
+    let t = (u - v) * k;
+    let cell_s = s.floor();
+    let cell_t = t.floor();
+    let fs = s - cell_s - 0.5; // [-0.5, 0.5] within the lattice cell
+    let ft = t - cell_t - 0.5;
+
+    // Alternate stud orientation per cell.
+    let (along, across) = if ((cell_s + cell_t) as i64).rem_euclid(2) == 0 {
+        (fs, ft)
+    } else {
+        (ft, fs)
+    };
+
+    // Rounded-bar SDF: half-length 0.28, half-width via the 0.16 falloff.
+    let dx = (along.abs() - 0.28).max(0.0);
+    let dy = across.abs();
+    let d = (dx * dx + dy * dy).sqrt();
+    let stud = (1.0 - d / 0.16).clamp(0.0, 1.0);
+    stud * stud * (3.0 - 2.0 * stud) // smoothstep shoulder
+}
+
+/// Deterministic integer hash → \[0, 1\] for the hammered dimple jitter.
+fn cell_hash(bx: i64, by: i64, seed: u32) -> f64 {
+    let mut h = seed as u64;
+    h ^= (bx as u64).wrapping_mul(6_364_136_223_846_793_005);
+    h ^= (by as u64).wrapping_mul(1_442_695_040_888_963_407);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    (h as f64) * (1.0 / u64::MAX as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn styled(style: MetalStyle) -> MetalConfig {
+        MetalConfig {
+            style,
+            ..MetalConfig::default()
+        }
+    }
+
+    #[test]
+    fn all_styles_generate() {
+        for style in [
+            MetalStyle::Brushed,
+            MetalStyle::StandingSeam,
+            MetalStyle::Hammered,
+            MetalStyle::DiamondPlate,
+        ] {
+            let map = MetalGenerator::new(styled(style))
+                .generate(32, 32)
+                .expect("generate failed");
+            assert_eq!(map.albedo.len(), 32 * 32 * 4);
+        }
+    }
+
+    #[test]
+    fn new_styles_differ_from_brushed() {
+        let brushed = MetalGenerator::new(styled(MetalStyle::Brushed))
+            .generate(64, 64)
+            .expect("generate failed");
+        for style in [MetalStyle::Hammered, MetalStyle::DiamondPlate] {
+            let other = MetalGenerator::new(styled(style.clone()))
+                .generate(64, 64)
+                .expect("generate failed");
+            assert_ne!(
+                brushed.normal, other.normal,
+                "{style:?} must shape the surface differently from Brushed"
+            );
+        }
+    }
+
+    #[test]
+    fn dimple_and_stud_fields_tile() {
+        for x in [0.0, 0.25, 0.75] {
+            assert!((dimple_height(0.0, x, 6.0, 7) - dimple_height(1.0, x, 6.0, 7)).abs() < 1e-12);
+            assert!((dimple_height(x, 0.0, 6.0, 7) - dimple_height(x, 1.0, 6.0, 7)).abs() < 1e-12);
+            assert!((diamond_stud(0.0, x, 6.0) - diamond_stud(1.0, x, 6.0)).abs() < 1e-12);
+            assert!((diamond_stud(x, 0.0, 6.0) - diamond_stud(x, 1.0, 6.0)).abs() < 1e-12);
+        }
     }
 }

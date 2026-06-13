@@ -170,6 +170,7 @@ impl SurfaceCell for CorrugatedCell<'_> {
             roughness: rough,
             metallic: met,
             occlusion: 1.0,
+            emissive: [0.0, 0.0, 0.0],
         }
     }
 }

@@ -31,13 +31,21 @@ use crate::{
     asphalt::AsphaltConfig,
     bark::BarkConfig,
     brick::BrickConfig,
+    chain_link::ChainLinkConfig,
     cobblestone::CobblestoneConfig,
     concrete::ConcreteConfig,
     corrugated::CorrugatedConfig,
     encaustic::{EncausticConfig, EncausticPattern},
+    fabric::FabricConfig,
+    flame::FlameConfig,
+    flower::FlowerConfig,
     ground::GroundConfig,
+    ice::IceConfig,
     iron_grille::IronGrilleConfig,
+    lava::LavaConfig,
     leaf::LeafConfig,
+    leaf_sprite::LeafSpriteConfig,
+    log_end::LogEndConfig,
     marble::MarbleConfig,
     metal::MetalConfig,
     pavers::PaversConfig,
@@ -46,8 +54,10 @@ use crate::{
     puff::PuffConfig,
     ring::RingConfig,
     rock::RockConfig,
+    sand::SandConfig,
     shard::ShardConfig,
     shingle::ShingleConfig,
+    snow::SnowConfig,
     snowflake::SnowflakeConfig,
     soft_disc::SoftDiscConfig,
     spark::SparkConfig,
@@ -428,7 +438,9 @@ impl_genotype!(MetalConfig {
     seed: seed,
     style: enum_cycle([
         crate::metal::MetalStyle::Brushed,
-        crate::metal::MetalStyle::StandingSeam
+        crate::metal::MetalStyle::StandingSeam,
+        crate::metal::MetalStyle::Hammered,
+        crate::metal::MetalStyle::DiamondPlate
     ]),
     scale: f64(1.0, 1.0, 16.0),
     seam_count: f64_round(1.0, 1.0, 16.0),
@@ -687,6 +699,120 @@ impl_genotype!(ShardConfig {
     edge_band: f64(0.05, 0.02, 0.5),
     grain: f64(0.1, 0.0, 1.0),
     normal_strength: f32(0.4, 0.0, 6.0),
+});
+
+impl_genotype!(LogEndConfig {
+    seed: seed,
+    ring_count: f64_round(2.0, 4.0, 30.0),
+    ring_warp: f64(0.1, 0.0, 1.0),
+    ring_contrast: f64(0.3, 0.5, 4.0),
+    crack_count: f64_round(1.0, 0.0, 12.0),
+    bark_width: f64(0.02, 0.02, 0.2),
+    color_early: color3(0.06),
+    color_late: color3(0.06),
+    color_bark: color3(0.06),
+    normal_strength: f32(0.3, 0.5, 6.0),
+});
+
+impl_genotype!(ChainLinkConfig {
+    seed: seed,
+    cell_count: f64_round(1.0, 4.0, 16.0),
+    wire_radius: f64(0.015, 0.02, 0.2),
+    weave_depth: f64(0.1, 0.0, 1.0),
+    rust_level: f64(0.1, 0.0, 1.0),
+    color_wire: color3(0.06),
+    color_rust: color3(0.06),
+    normal_strength: f32(0.3, 0.5, 6.0),
+});
+
+impl_genotype!(LavaConfig {
+    seed: seed,
+    plate_scale: f64(0.7, 3.0, 12.0),
+    crack_width: f64(0.03, 0.02, 0.3),
+    glow_falloff: f64(0.3, 0.5, 4.0),
+    color_crust: color3(0.04),
+    color_glow: color3(0.07),
+    emissive_intensity: f32(0.3, 0.0, 4.0),
+    normal_strength: f32(0.3, 0.5, 6.0),
+});
+
+impl_genotype!(IceConfig {
+    seed: seed,
+    scale: f64(0.6, 1.0, 8.0),
+    crack_density: f64(0.7, 1.0, 8.0),
+    vein_sharpness: f64(1.0, 2.0, 12.0),
+    frost_level: f64(0.1, 0.0, 1.0),
+    color_ice: color3(0.05),
+    color_crack: color3(0.05),
+    normal_strength: f32(0.25, 0.0, 4.0),
+});
+
+impl_genotype!(SnowConfig {
+    seed: seed,
+    drift_scale: f64(0.5, 1.0, 6.0),
+    drift_octaves: usize(2, 6),
+    sparkle_density: f64(0.04, 0.0, 0.5),
+    crust_roughness: f64(0.06, 0.5, 1.0),
+    color_snow: color3(0.05),
+    color_shadow: color3(0.05),
+    normal_strength: f32(0.3, 0.5, 5.0),
+});
+
+impl_genotype!(SandConfig {
+    seed: seed,
+    ripple_count: f64_round(2.0, 4.0, 24.0),
+    ripple_warp: f64(0.15, 0.0, 1.5),
+    grain_density: f64(0.05, 0.0, 0.5),
+    grain_scale: f64(4.0, 8.0, 48.0),
+    color_crest: color3(0.07),
+    color_trough: color3(0.07),
+    normal_strength: f32(0.3, 0.5, 6.0),
+});
+
+impl_genotype!(FabricConfig {
+    seed: seed,
+    thread_count: f64_round(4.0, 8.0, 64.0),
+    thread_width: f64(0.08, 0.3, 0.98),
+    weave_contrast: f64(0.12, 0.0, 1.0),
+    fuzz: f64(0.1, 0.0, 1.0),
+    color_warp: color3(0.07),
+    color_weft: color3(0.07),
+    normal_strength: f32(0.4, 0.5, 6.0),
+});
+
+impl_genotype!(FlowerConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    petal: genotype,
+    petal_count: usize(4, 12),
+    center_radius: f64(0.03, 0.05, 0.3),
+    center_color: color3(0.07),
+    dot_density: f64(0.1, 0.0, 1.0),
+    normal_strength: f32(0.2, 0.0, 4.0),
+});
+
+impl_genotype!(FlameConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    elongation: f64(0.2, 1.0, 3.0),
+    turbulence: f64(0.15, 0.0, 1.5),
+    lean_jitter: f64(0.05, 0.0, 0.5),
+    falloff: f64(0.3, 0.5, 4.0),
+    color_core: color3(0.07),
+    color_mid: color3(0.07),
+    color_tip: color3(0.07),
+    normal_strength: f32(0.2, 0.0, 4.0),
+});
+
+impl_genotype!(LeafSpriteConfig {
+    seed: seed,
+    variant_rows: usize(1, 16),
+    variant_cols: usize(1, 16),
+    leaf: genotype,
+    shape_jitter: f64(0.1, 0.0, 1.0),
+    tint_jitter: f32(0.08, 0.0, 1.0),
 });
 
 // --- TextureConfig dispatch ---------------------------------------------------
