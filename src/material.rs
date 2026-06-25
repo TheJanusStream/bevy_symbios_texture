@@ -77,7 +77,7 @@ fn card_render_properties() -> RenderProperties {
 /// Generates the [`TextureConfig`] enum and its supporting impls for every
 /// generator in the crate.  Receives the registry rows
 /// `(Variant, module, ConfigTy, GeneratorTy, Kind)` from
-/// [`for_each_generator!`](crate::registry::for_each_generator); the
+/// [`for_each_generator!`](symbios_texture::for_each_generator); the
 /// generator type is unused here (the async constructors consume it).
 macro_rules! define_texture_config {
     ($(($variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, $kind:ident)),* $(,)?) => {
@@ -186,13 +186,13 @@ macro_rules! define_texture_config {
             /// [`TextureCache::manifest_version`](crate::cache::TextureCache::manifest_version)
             /// instead.
             pub fn fingerprint(&self) -> u64 {
-                let mut h = crate::fingerprint::Fnv1a::new();
+                let mut h = symbios_texture::fingerprint::Fnv1a::new();
                 // Tag the kind separately so two distinct configs that
                 // happen to share a field layout stay distinguishable.
                 self.label().hash(&mut h);
                 match self {
                     Self::None => {}
-                    $(Self::$variant(c) => crate::fingerprint::hash_value(c, &mut h)),*,
+                    $(Self::$variant(c) => symbios_texture::fingerprint::hash_value(c, &mut h)),*,
                 }
                 h.finish()
             }
@@ -215,7 +215,48 @@ fn kind_to_render_properties(kind: TextureKind) -> RenderProperties {
     }
 }
 
-crate::registry::for_each_generator!(define_texture_config);
+symbios_texture::for_each_generator!(define_texture_config);
+
+/// Generates the [`symbios_genetics::Genotype`] dispatch for the
+/// [`TextureConfig`] enum from the registry rows: mutation delegates to the
+/// wrapped config; crossover recombines like variants field-wise and falls
+/// back to a uniform parent pick for mismatched variants (their fields cannot
+/// be recombined).
+///
+/// This lives in the wrapper crate (not the Bevy-free `symbios-texture` core)
+/// because `TextureConfig` is defined here — its inherent `spawn`/
+/// `render_properties` methods are Bevy-coupled — so the orphan rule requires
+/// the `impl Genotype for TextureConfig` to be in this crate too.  The
+/// per-config `impl Genotype for FooConfig` blocks stay in the core
+/// (`symbios_texture::genetics`).
+macro_rules! impl_texture_config_genotype {
+    ($(($variant:ident, $module:ident, $config_ty:ty, $generator_ty:ty, $kind:ident)),* $(,)?) => {
+        impl symbios_genetics::Genotype for TextureConfig {
+            fn mutate<R: rand::Rng>(&mut self, rng: &mut R, rate: f32) {
+                match self {
+                    TextureConfig::None => {}
+                    $(TextureConfig::$variant(c) => c.mutate(rng, rate)),*,
+                }
+            }
+
+            fn crossover<R: rand::Rng>(&self, other: &Self, rng: &mut R) -> Self {
+                match (self, other) {
+                    $((TextureConfig::$variant(a), TextureConfig::$variant(b)) =>
+                        TextureConfig::$variant(a.crossover(b, rng)),)*
+                    (a, b) => {
+                        if rng.random::<bool>() {
+                            a.clone()
+                        } else {
+                            b.clone()
+                        }
+                    }
+                }
+            }
+        }
+    };
+}
+
+symbios_texture::for_each_generator!(impl_texture_config_genotype);
 
 /// PBR material settings driven by a [`TextureConfig`].
 ///
@@ -483,6 +524,42 @@ mod tests {
     use crate::iron_grille::IronGrilleConfig;
     use crate::leaf::LeafConfig;
     use crate::stained_glass::StainedGlassConfig;
+
+    /// The `impl Genotype for TextureConfig` dispatch (kept in this wrapper
+    /// crate alongside the enum) delegates mutation to the wrapped config and
+    /// recombines like variants field-wise.  Smoke-test both paths.
+    #[test]
+    fn texture_config_genotype_dispatch() {
+        use rand::SeedableRng;
+        use symbios_genetics::Genotype;
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(7);
+
+        // None mutates to itself; carried-config mutation does not panic.
+        let mut none = TextureConfig::None;
+        none.mutate(&mut rng, 1.0);
+        assert!(matches!(none, TextureConfig::None));
+
+        let mut bark = TextureConfig::Bark(BarkConfig::default());
+        bark.mutate(&mut rng, 1.0);
+        assert!(matches!(bark, TextureConfig::Bark(_)));
+
+        // Like-variant crossover keeps the variant; mismatched variants pick a
+        // whole parent.
+        let a = TextureConfig::Bark(BarkConfig::default());
+        let b = TextureConfig::Bark(BarkConfig {
+            seed: 99,
+            ..BarkConfig::default()
+        });
+        assert!(matches!(a.crossover(&b, &mut rng), TextureConfig::Bark(_)));
+
+        let leaf = TextureConfig::Leaf(LeafConfig::default());
+        let mixed = a.crossover(&leaf, &mut rng);
+        assert!(matches!(
+            mixed,
+            TextureConfig::Bark(_) | TextureConfig::Leaf(_)
+        ));
+    }
 
     /// Every variant has a distinct, non-empty label.
     #[test]

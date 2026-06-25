@@ -109,6 +109,17 @@ fn build_pool(cfg: &AsyncTextureConfig) -> Option<rayon::ThreadPool> {
     let n = resolve_pool_threads(cfg);
     match rayon::ThreadPoolBuilder::new()
         .num_threads(n)
+        // Texture generation runs deep-but-bounded work on these workers:
+        // generators evaluate high-octave FBM (bark/marble `warp_octaves`,
+        // ground/marble octave stacks) and the per-row `generate_surface`
+        // closures spawn *nested* rayon parallel iterators that work-steal
+        // back onto this same pool.  Recursive work-stealing plus the sizeable
+        // per-sample stack frames overflow rayon's default worker stack
+        // (~2 MiB) a few seconds into a world load.  The work is finite — the
+        // octave counts are clamped (≤14) by the genetics search space and no
+        // generator recurses unboundedly — so the correct fix is simply a
+        // larger worker stack rather than an algorithm change.
+        .stack_size(8 * 1024 * 1024)
         .thread_name(|i| format!("texture-gen-{i}"))
         .build()
     {
@@ -270,7 +281,8 @@ where
 }
 
 /// Generates one [`PendingTexture`] constructor per registry row (see
-/// [`crate::registry`] for the table and the add-a-generator checklist).
+/// [`symbios_texture::registry`] for the table and the add-a-generator
+/// checklist).
 /// Surface rows upload via [`map_to_images`] (repeat sampler); Card rows
 /// set `is_card` so the polling systems use [`map_to_images_card`]
 /// (clamp-to-edge sampler).
@@ -309,7 +321,7 @@ macro_rules! define_pending_constructors {
     };
 }
 
-crate::registry::for_each_generator!(define_pending_constructors);
+symbios_texture::for_each_generator!(define_pending_constructors);
 
 /// Added to the entity by [`poll_texture_tasks`] when generation is complete.
 #[derive(Component)]

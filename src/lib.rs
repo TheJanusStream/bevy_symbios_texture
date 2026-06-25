@@ -1,5 +1,17 @@
 //! `bevy_symbios_texture` — procedural texture generation for Bevy.
 //!
+//! # Crate split
+//!
+//! The pure, Bevy-free generation core lives in the [`symbios_texture`] crate
+//! (every generator module, its `Config`/`Generator` types, the
+//! [`TextureGenerator`] trait, the [`TextureMap`] pipeline, [`ToroidalNoise`],
+//! the [`sprite`]/[`surface`] kits, the per-config genetics, and the
+//! registry).  This wrapper re-exports that core wholesale and adds the
+//! Bevy-coupled layer: the [`SymbiosTexturePlugin`], the async generation
+//! pool, the `bevy` `Image` upload adapters, the
+//! [`TextureCache`] resource, the procedural-material builder, and the egui
+//! UI.  The public API is unchanged across the split.
+//!
 //! # Generators
 //!
 //! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
@@ -61,58 +73,20 @@
 //! [`TextureCache`]: cache::TextureCache
 //! [`TextureConfig`]: material::TextureConfig
 
-pub mod ashlar;
-pub mod asphalt;
+// Re-export the entire Bevy-free core so the public module paths
+// (`bevy_symbios_texture::ashlar`, `::sprite`, `::genetics`, …) and every
+// pure `Config`/`Generator`/helper type are preserved exactly.  The wrapper's
+// own `generator` module below shadows the core's `generator` in this glob
+// (it re-exports the core items and adds the Bevy upload adapters), so
+// `bevy_symbios_texture::generator` is the merged view.
+pub use symbios_texture::*;
+
+// Bevy-coupled modules kept in the wrapper.
 pub mod async_gen;
-pub mod bark;
-pub mod brick;
 pub mod cache;
-pub mod chain_link;
-pub mod cobblestone;
-pub mod concrete;
-pub mod corrugated;
 pub mod curve;
-pub mod encaustic;
-pub mod fabric;
-pub(crate) mod fingerprint;
-pub mod flame;
-pub mod flower;
 pub mod generator;
-pub mod genetics;
-pub mod ground;
-pub mod ice;
-pub mod iron_grille;
-pub mod lava;
-pub mod leaf;
-pub mod leaf_sprite;
-pub mod log_end;
-pub mod marble;
 pub mod material;
-pub mod metal;
-pub mod noise;
-pub mod normal;
-pub mod pavers;
-pub mod petal;
-pub mod plank;
-pub mod puff;
-pub(crate) mod registry;
-pub mod ring;
-pub mod rock;
-pub mod sand;
-pub mod shard;
-pub mod shingle;
-pub mod snow;
-pub mod snowflake;
-pub mod soft_disc;
-pub mod spark;
-pub mod sprite;
-pub mod stained_glass;
-pub mod stucco;
-pub mod surface;
-pub mod thatch;
-pub mod twig;
-pub mod wainscoting;
-pub mod window;
 
 #[cfg(feature = "egui")]
 pub mod ui;
@@ -130,15 +104,15 @@ pub use generator::{
     GeneratedHandles, TextureError, TextureGenerator, TextureMap, Workspace, map_to_images,
     map_to_images_card,
 };
-pub use leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
 pub use material::{
     MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig,
     build_procedural_material_async,
 };
-pub use noise::ToroidalNoise;
-pub use sprite::{CellRng, SpriteCell, SpriteSample, generate_atlas};
-pub use surface::{SurfaceCell, SurfaceSample, generate_surface};
-pub use twig::{TwigConfig, TwigGenerator};
+pub use symbios_texture::leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
+pub use symbios_texture::noise::ToroidalNoise;
+pub use symbios_texture::sprite::{CellRng, SpriteCell, SpriteSample, generate_atlas};
+pub use symbios_texture::surface::{SurfaceCell, SurfaceSample, generate_surface};
+pub use symbios_texture::twig::{TwigConfig, TwigGenerator};
 
 use bevy::prelude::*;
 
