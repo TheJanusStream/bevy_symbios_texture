@@ -102,7 +102,7 @@ pub use curve::{
 };
 pub use generator::{
     GeneratedHandles, TextureError, TextureGenerator, TextureMap, Workspace, map_to_images,
-    map_to_images_card,
+    map_to_images_card, map_to_images_card_with_usages, map_to_images_with_usages,
 };
 pub use material::{
     MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig,

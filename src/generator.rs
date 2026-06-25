@@ -49,7 +49,27 @@ enum MipmapMode {
 ///
 /// Takes `map` by value to move the pixel buffers directly into the `Image`
 /// assets, avoiding an extra copy of up to 3 × W × H × 4 bytes.
+///
+/// Uploads with [`RenderAssetUsages::RENDER_WORLD`] only, so the CPU pixel
+/// buffer is released once the texture reaches the GPU. That is correct for
+/// textures bound straight to a material and never sampled back on the CPU, and
+/// a meaningful saving on wasm where linear memory never returns to the OS.
+/// Callers that read the pixels back after upload (e.g. concatenating layers
+/// into a texture array) must use [`map_to_images_with_usages`] with
+/// [`RenderAssetUsages::MAIN_WORLD`] to keep `Image::data` resident.
 pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
+    map_to_images_with_usages(map, RenderAssetUsages::RENDER_WORLD, images)
+}
+
+/// [`map_to_images`] with an explicit [`RenderAssetUsages`] (repeat-wrapping
+/// samplers). Pass [`RenderAssetUsages::MAIN_WORLD`] when the resulting
+/// `Image::data` must stay CPU-resident after upload; pass
+/// [`RenderAssetUsages::RENDER_WORLD`] (what [`map_to_images`] uses) to free it.
+pub fn map_to_images_with_usages(
+    map: TextureMap,
+    usages: RenderAssetUsages,
+    images: &mut Assets<Image>,
+) -> GeneratedHandles {
     GeneratedHandles {
         albedo: images.add(make_image(
             map.albedo,
@@ -59,6 +79,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::Repeat,
             MipmapMode::Srgb,
+            usages,
         )),
         normal: images.add(make_image(
             map.normal,
@@ -68,6 +89,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
             MipmapMode::Normal,
+            usages,
         )),
         roughness: images.add(make_image(
             map.roughness,
@@ -77,6 +99,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::Repeat,
             MipmapMode::Linear,
+            usages,
         )),
         emissive: map.emissive.map(|data| {
             images.add(make_image(
@@ -87,6 +110,7 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
                 TextureFormat::Rgba8UnormSrgb,
                 ImageAddressMode::Repeat,
                 MipmapMode::Srgb,
+                usages,
             ))
         }),
     }
@@ -98,7 +122,22 @@ pub fn map_to_images(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHa
 /// grille) and sprite atlases, where the texture must not tile and the alpha
 /// silhouette must not bleed across edges.  For tileable surfaces use
 /// [`map_to_images`] instead.
+///
+/// Like [`map_to_images`], uploads with [`RenderAssetUsages::RENDER_WORLD`]
+/// only (CPU buffer freed after GPU upload); use
+/// [`map_to_images_card_with_usages`] when the pixels must stay CPU-resident.
 pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> GeneratedHandles {
+    map_to_images_card_with_usages(map, RenderAssetUsages::RENDER_WORLD, images)
+}
+
+/// [`map_to_images_card`] with an explicit [`RenderAssetUsages`] (clamp-to-edge
+/// samplers). See [`map_to_images_with_usages`] for when to choose
+/// `MAIN_WORLD` over the default `RENDER_WORLD`.
+pub fn map_to_images_card_with_usages(
+    map: TextureMap,
+    usages: RenderAssetUsages,
+    images: &mut Assets<Image>,
+) -> GeneratedHandles {
     GeneratedHandles {
         albedo: images.add(make_image(
             map.albedo,
@@ -108,6 +147,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             TextureFormat::Rgba8UnormSrgb,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Srgb,
+            usages,
         )),
         normal: images.add(make_image(
             map.normal,
@@ -117,6 +157,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Normal,
+            usages,
         )),
         roughness: images.add(make_image(
             map.roughness,
@@ -126,6 +167,7 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
             TextureFormat::Rgba8Unorm,
             ImageAddressMode::ClampToEdge,
             MipmapMode::Linear,
+            usages,
         )),
         emissive: map.emissive.map(|data| {
             images.add(make_image(
@@ -136,11 +178,13 @@ pub fn map_to_images_card(map: TextureMap, images: &mut Assets<Image>) -> Genera
                 TextureFormat::Rgba8UnormSrgb,
                 ImageAddressMode::ClampToEdge,
                 MipmapMode::Srgb,
+                usages,
             ))
         }),
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn make_image(
     data: Vec<u8>,
     width: u32,
@@ -149,6 +193,7 @@ fn make_image(
     format: TextureFormat,
     address_mode: ImageAddressMode,
     mipmap_mode: MipmapMode,
+    usages: RenderAssetUsages,
 ) -> Image {
     // Accept a chain precomputed on the worker ([`TextureMap::with_mips`]) or
     // compute one here for base-only buffers (synchronous callers, FileStore
@@ -167,7 +212,7 @@ fn make_image(
         },
         TextureDimension::D2,
         format,
-        RenderAssetUsages::default(),
+        usages,
     );
     image.texture_descriptor.mip_level_count = mip_level_count;
     image.data = Some(mip_data);
