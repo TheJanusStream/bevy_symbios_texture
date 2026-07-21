@@ -129,6 +129,22 @@ pub trait TextureCacheStore: Send + Sync {
     fn peek_memory_only(&self, _key: &TextureCacheKey) -> Option<Arc<GeneratedHandles>> {
         None
     }
+
+    /// Number of entries currently held in memory, when the backend can say.
+    ///
+    /// Purely observational — for a consumer that wants to graph cache size
+    /// against process memory. A cache holding `Handle<Image>` keeps those
+    /// images alive, so its length is often the missing term when an
+    /// application is trying to attribute asset-registry growth.
+    ///
+    /// `None` (the default) means "this backend does not track a live entry
+    /// count", which is the honest answer for a disk-backed store whose
+    /// entries live on the filesystem rather than in RAM. Reporting `0`
+    /// instead would read as "empty" and mislead exactly the diagnosis this
+    /// exists to support.
+    fn entry_count(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Bevy resource wrapper for any [`TextureCacheStore`] implementation.
@@ -160,6 +176,17 @@ impl TextureCache {
             manifest_version,
             inner: Mutex::new(store),
         }
+    }
+
+    /// Entries the backing store currently holds in memory, when it tracks
+    /// one — see [`TextureCacheStore::entry_count`]. `None` for backends
+    /// whose entries are not resident (e.g. [`FileStore`]).
+    ///
+    /// Intended for a diagnostics gauge: this cache retains `Handle<Image>`,
+    /// so its size is a direct term in the host application's image-asset
+    /// count.
+    pub fn entry_count(&self) -> Option<usize> {
+        self.inner.lock().ok()?.entry_count()
     }
 
     /// Convenience: in-memory cache with the default capacity.
@@ -289,6 +316,10 @@ impl TextureCacheStore for MemoryStore {
 
     fn peek_memory_only(&self, key: &TextureCacheKey) -> Option<Arc<GeneratedHandles>> {
         self.entries.get(key).cloned()
+    }
+
+    fn entry_count(&self) -> Option<usize> {
+        Some(self.entries.len())
     }
 }
 
