@@ -17,8 +17,9 @@
 //!   library hash (currently SipHash-1-3 via `DefaultHasher`) of the cache
 //!   key.  Survives process restarts and lets a CLI tool warm the cache
 //!   from a manifest before the application launches.  Stored blobs are
-//!   raw RGBA8 base levels (albedo + normal + ORM) — mipmaps are
-//!   regenerated on upload by [`map_to_images`] / [`map_to_images_card`].
+//!   raw RGBA8 base levels (albedo + normal + ORM, plus emissive when the
+//!   generator produced one) — mipmaps are regenerated on upload by
+//!   [`map_to_images`] / [`map_to_images_card`].
 //!
 //! Cache invalidation is driven by [`TextureConfig::fingerprint`]: any change
 //! to a config field rolls the fingerprint and therefore the
@@ -49,9 +50,10 @@ use crate::generator::{GeneratedHandles, TextureMap, map_to_images, map_to_image
 
 /// Default maximum number of entries kept in [`MemoryStore`].
 ///
-/// At common resolutions each entry costs three [`Image`] handles + their
-/// pixel buffers (a few hundred kilobytes).  256 entries hovers around 100 MB
-/// of GPU memory and covers most building/biome palettes without thrashing.
+/// At common resolutions each entry costs three or four [`Image`] handles
+/// (albedo, normal, ORM, and optionally emissive) + their pixel buffers (a
+/// few hundred kilobytes).  256 entries hovers around 100 MB of GPU memory
+/// and covers most building/biome palettes without thrashing.
 pub const DEFAULT_MEMORY_CACHE_ENTRIES: usize = 256;
 
 /// Stable identifier for a cached texture set.

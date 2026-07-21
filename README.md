@@ -7,22 +7,23 @@ entirely on the CPU — no asset files required. Generation is multi-core
 (rows are produced in parallel) and seamlessly tileable for all surface
 textures via toroidal 4-D noise mapping. Alpha-masked card textures (leaf,
 twig, window, stained glass, iron grille, chain-link, log-end) produce
-per-pixel transparency and do not tile. Sprite-atlas generators (soft disc,
-spark, snowflake, puff, ring, petal, shard, leaf sprite, flame, flower) bake
-alpha-silhouette particle-billboard sheets where every atlas cell is a
-per-cell-seeded variant of the same config.
+per-pixel transparency and do not tile. Atlas-capable card generators —
+particle sprites (soft disc, spark, snowflake, puff, ring, petal, shard,
+flame, flower) and foliage billboards (leaf sprite, grass tuft, frond,
+reed, needle, broadleaf) — bake alpha-silhouette sheets where every atlas
+cell is a per-cell-seeded variant of the same config.
 
 ## Bevy compatibility
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.4 – 0.6            | 0.18 |
+| 0.4 – 0.7            | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.6"
+bevy_symbios_texture = "0.7"
 ```
 
 The optional `egui` feature adds editor widgets for every config type
@@ -30,35 +31,8 @@ The optional `egui` feature adds editor widgets for every config type
 
 ```toml
 [dependencies]
-bevy_symbios_texture = { version = "0.6", features = ["egui"] }
+bevy_symbios_texture = { version = "0.7", features = ["egui"] }
 ```
-
-## Migrating from 0.5 to 0.6
-
-0.6 adds ten new generators (fabric, sand, snow, ice, lava, leaf_sprite,
-flame, flower, chain_link, log_end) plus hammered and diamond-plate metal
-styles, and parallelises generation across cores.  The breaking changes:
-
-* **`TextureMap` gained fields.** It now carries `emissive: Option<Vec<u8>>`
-  and `mip_level_count: u32` in addition to the three pixel buffers.  Code
-  that constructs `TextureMap` literals must add these (`emissive: None`,
-  `mip_level_count: 1` for a freshly generated base level).  `GeneratedHandles`
-  likewise gained `emissive: Option<Handle<Image>>`.
-* **Mipmaps are computed on the worker thread.** Async generation now returns
-  a `TextureMap` with the full chain already appended; `map_to_images`
-  computes it on demand only when absent, so most callers need no change.
-* **`generate_atlas` and `sample_grid`/`sample_grid_into` gained `Sync`
-  bounds** to enable row-parallel generation.  Custom `SpriteCell` types and
-  4-D noise functions must be `Sync` (they already are in practice).
-* **Cache identity changed.** Fingerprints are now a structural hash of the
-  config (stable across Rust versions and platforms) rather than a hash of
-  the `Debug` string, and `FileStore` blobs use on-disk format v3 with
-  `manifest_version` mixed into the key.  Existing `FileStore` caches are
-  invalidated once and rebuild automatically.
-* **Accepted visual drift.** Bark and marble warp layers now use a separate
-  `warp_octaves` field (default 3) instead of the base `octaves`, so default
-  output shifts slightly.  Configs serialised before 0.6 still deserialise
-  (the field defaults to 3).
 
 ## Quick start
 
@@ -207,6 +181,12 @@ eviction, default) and `FileStore` (binary blobs on disk) — and exposes the
 pixel blobs as generation completes and re-uploads them (regenerating
 mipmaps) on the first hit after a restart, so warm caches survive across
 processes.
+
+For diagnostics, `TextureCache::entry_count()` reports how many entries the
+backing store currently holds in memory — `Some(len)` for `MemoryStore`,
+`None` for `FileStore`, whose entries live on disk.  Because the cache
+retains `Handle<Image>` clones, its entry count is often the missing term
+when attributing image-asset growth in a running application.
 
 ### Animated parameter curves
 
@@ -693,6 +673,90 @@ let config = IceConfig {
 };
 ```
 
+#### Moss
+
+A dense velvety moss carpet: broad FBM cushion hummocks overlaid with a
+fine filament-tip stipple, plus scattered patches bleached toward a dry
+straw tone.  Shaded crevices read deep green while the cushion crowns catch
+a bright yellow-green.
+
+```rust
+use bevy_symbios_texture::moss::MossConfig;
+
+let config = MossConfig {
+    seed: 21,
+    cushion_scale: 5.0,     // hummock scale (lower = broader mounds)
+    cushion_octaves: 4,
+    filament_scale: 34.0,   // filament-tip stipple frequency (higher = finer)
+    filament_octaves: 3,
+    filament_weight: 0.45,  // stipple blend weight [0, 1]
+    color_deep: [0.03, 0.09, 0.03],  // shaded crevice colour
+    color_tip: [0.26, 0.44, 0.10],   // cushion-crown colour
+    color_dry: [0.38, 0.34, 0.14],   // bleached straw tone
+    dry_patches: 0.25,      // share of the carpet bleached dry [0, 1]
+    dry_scale: 2.5,         // dry-patch scale (lower = larger patches)
+    cushion_depth: 0.6,     // mound vs stipple share of the height field [0, 1]
+    normal_strength: 2.4,
+};
+```
+
+#### Lichen
+
+Crustose lichen colonies over bare rock: a thresholded FBM patch field with
+pale growing margins, a granular interior, and two species tints (sage
+grey-green and rusty orange) selected by a slower field, so a rock face
+shows several colonies rather than one flat wash.  Uncolonised texels keep
+the rock substrate colour.
+
+```rust
+use bevy_symbios_texture::lichen::LichenConfig;
+
+let config = LichenConfig {
+    seed: 7,
+    patch_scale: 3.0,       // colony field scale (lower = broader colonies)
+    patch_octaves: 2,       // more octaves = more raggedly-lobed outlines
+    coverage: 0.45,         // colonised fraction [0, 1]; 0 = bare rock
+    rim_width: 0.06,        // pale growing-margin width [0, 0.4]; 0 = none
+    species_scale: 1.8,     // species mix (lower = larger single-species areas)
+    color_rock: [0.13, 0.13, 0.12],      // bare substrate
+    color_lichen_a: [0.14, 0.17, 0.10],  // sage grey-green species
+    color_lichen_b: [0.26, 0.13, 0.04],  // rusty orange species
+    color_rim: [0.38, 0.40, 0.32],
+    grain_scale: 40.0,      // interior grain frequency (higher = finer)
+    grain_strength: 0.18,   // interior grain strength [0, 1]
+    relief: 0.5,            // how proud the crust stands of the rock [0, 1]
+    normal_strength: 1.8,
+};
+```
+
+#### Cactus Skin
+
+A tileable succulent hide: vertical accordion ribs, a periodic lattice of
+felted areoles seated on the rib crests, and pale spines radiating from
+each areole.  Ribs and areoles are integer-periodic, so the tile wraps
+seamlessly around an L-system cactus stem.
+
+```rust
+use bevy_symbios_texture::cactus::CactusSkinConfig;
+
+let config = CactusSkinConfig {
+    seed: 0,
+    rib_count: 8,           // vertical ribs around the tile [3, 40]
+    areole_rows: 9,         // areole rows up the tile [2, 40]
+    rib_depth: 0.85,        // accordion-pleat relief [0, 1]
+    rib_sharpness: 0.85,    // crest sharpness [0.3, 3]
+    color_skin: [0.22, 0.42, 0.27],    // waxy ridge colour
+    color_valley: [0.07, 0.17, 0.11],  // shaded pleat colour
+    color_areole: [0.55, 0.50, 0.40],  // felt cushions
+    color_spine: [0.86, 0.82, 0.66],
+    areole_size: 0.022,     // felt radius in UV units [0.005, 0.08]
+    spine_reach: 3.2,       // spine length as multiple of areole_size [1, 6]
+    spine_count: 8,         // spines per areole [0, 24]
+    waxiness: 0.55,         // gloss (higher = lower roughness) [0, 1]
+    normal_strength: 1.4,
+};
+```
+
 #### Wainscoting
 
 Wood-panel wainscoting with recessed panel faces, rail/stile framing, and
@@ -965,14 +1029,20 @@ let config = LavaConfig {
 
 ### Sprite atlases
 
-The sprite family produces small alpha-silhouette cards aimed at particle
-billboards.  Unlike the foliage cards, each sprite generator can bake a
+The atlas family produces alpha-silhouette cards for billboards.  Unlike
+the single-image cards above, each generator here can bake a
 `variant_rows × variant_cols` **atlas** in a single image: every cell renders
 the same config with a per-cell derived seed, so a particle system using
 random atlas frames gets per-particle shape variety from one texture bake.
 Atlas dimensions are clamped to `1..=16` per axis; `1 × 1` bakes a single
-sprite.  Soft fractional alpha is encouraged — glows and mist fade out
-smoothly rather than cutting like foliage cards.
+card.
+
+The family spans two idioms.  The **particle sprites** (soft disc, spark,
+snowflake, puff, ring, petal, shard, flame) use soft fractional alpha —
+glows and mist fade out smoothly.  The **foliage billboards** (leaf sprite,
+grass tuft, frond, reed, needle, broadleaf) cut hard silhouettes like the
+foliage cards and default to `1 × 1` — a single vegetation card — with the
+atlas as an opt-in for per-instance variety.
 
 Shared scaffolding (the `SpriteCell` trait, the `generate_atlas` driver, and
 the deterministic `CellRng` parameter stream) lives in the `sprite` module.
@@ -1231,6 +1301,151 @@ let config = LeafSpriteConfig {
 };
 ```
 
+#### Grass Tuft
+
+A clump of curved, tip-tapered grass blades fanning from a common root line
+at the bottom edge — the workhorse ground-cover billboard.  Blades jitter
+height, lean, curvature, width, and dryness per variant.
+
+```rust
+use bevy_symbios_texture::grass::GrassTuftConfig;
+
+let config = GrassTuftConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]; 1 × 1 bakes a single tuft
+    variant_cols: 1,
+    blade_count: 9,        // blades per tuft [1, 24]
+    color_base: [0.11, 0.17, 0.06],  // shaded root colour
+    color_tip: [0.36, 0.46, 0.14],   // bright tip colour
+    color_dry: [0.46, 0.39, 0.15],   // dry/dead blade tone
+    blade_width: 0.05,     // root half-width as cell fraction [0.01, 0.12]
+    blade_taper: 1.3,      // tip taper exponent [0.5, 4]
+    height_min: 0.55,      // shortest blade height [0.2, 1]
+    height_max: 0.96,      // tallest blade height [0.2, 1]
+    fan_spread: 0.34,      // lateral tip splay [0, 0.5]
+    curve: 0.14,           // outward blade arc toward the tip [0, 0.5]
+    base_spread: 0.16,     // horizontal root spread [0, 0.4]
+    dry_fraction: 0.22,    // share of dry blades [0, 1]
+    normal_strength: 1.2,
+};
+```
+
+#### Reed
+
+A shoreline reed / cattail clump: tall, near-vertical strap leaves rising
+from a common waterline base, with an optional share of stalks topped by
+the cattail's brown catkin spike.  Far taller and straighter than the grass
+tuft.
+
+```rust
+use bevy_symbios_texture::reed::ReedConfig;
+
+let config = ReedConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]
+    variant_cols: 1,
+    blade_count: 6,        // leaves per clump [1, 12]
+    color_base: [0.10, 0.16, 0.06],
+    color_tip: [0.38, 0.44, 0.16],
+    color_catkin: [0.24, 0.13, 0.05],  // seed-head colour
+    blade_width: 0.022,    // base half-width as cell fraction [0.008, 0.08]
+    height_min: 0.62,      // shortest leaf height [0.3, 1]
+    height_max: 0.98,      // tallest leaf height [0.3, 1]
+    lean: 0.09,            // lateral tip lean [0, 0.3]; reeds stand straight
+    tip_fraction: 0.28,    // leaf-length fraction that tapers [0.05, 0.8]
+    catkin_share: 0.4,     // stalks bearing a catkin [0, 1]
+    catkin_length: 0.2,    // catkin length as cell fraction [0, 0.4]
+    catkin_width: 0.022,   // catkin half-width [0.005, 0.06]
+    normal_strength: 1.2,
+};
+```
+
+#### Needle
+
+A conifer needle-cluster shoot — the conifer counterpart of the broadleaf
+twig card.  Paired needles splay outward and forward from a woody axis,
+shortening toward the tip.  A wide `needle_angle` with long needles reads
+as pine, a narrow angle with short needles as spruce, a high `pair_count`
+with minimal taper as fir.
+
+```rust
+use bevy_symbios_texture::needle::NeedleConfig;
+
+let config = NeedleConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]
+    variant_cols: 1,
+    pair_count: 11,        // needle pairs along the shoot [1, 24]
+    color_base: [0.05, 0.13, 0.07],
+    color_tip: [0.16, 0.31, 0.14],
+    color_shoot: [0.21, 0.13, 0.07],  // woody axis colour
+    needle_angle: 42.0,    // splay from the shoot axis, degrees [5, 85]
+    needle_length: 0.3,    // needle length as cell fraction [0.05, 0.6]
+    needle_width: 0.009,   // needle half-width [0.002, 0.03]
+    length_taper: 0.55,    // shortening toward the shoot tip [0, 1]
+    shoot_length: 0.9,     // shoot length as cell fraction [0.2, 1]
+    shoot_width: 0.009,    // shoot half-width [0.002, 0.04]
+    normal_strength: 1.2,
+};
+```
+
+#### Frond
+
+A single leaflet (pinna) of a pinnate frond: a narrow lanceolate strap with
+a strong central midrib and shallow pinnate veins.  One depth knob spans an
+entire (palm-leaflet) margin to the lobed pinnule of a fern — the drop-in
+leaflet card for an L-system palm or fern whose rachis geometry is drawn by
+the grammar.
+
+```rust
+use bevy_symbios_texture::frond::FrondConfig;
+
+let config = FrondConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]
+    variant_cols: 1,
+    color_base: [0.11, 0.30, 0.09],
+    color_edge: [0.22, 0.42, 0.13],  // margin / tip colour
+    width: 0.13,           // max half-width as cell fraction [0.04, 0.30]
+    tip_taper: 1.4,        // tip acuteness [0.4, 3]
+    midrib_width: 0.16,    // midrib ridge width as local half-width fraction
+    vein_count: 9.0,       // pinnate secondary vein pairs
+    lobe_count: 0.0,       // margin lobes per side; 0 = entire margin
+    lobe_depth: 0.0,       // lobe cut depth [0, 0.6]; 0 = smooth palm leaflet
+    normal_strength: 1.3,
+};
+```
+
+#### Broadleaf
+
+A palmate broadleaf built in polar coordinates about its petiole
+attachment: a radius function with `lobe_count` peaks carves the classic
+maple / sycamore / ivy silhouettes, with main veins radiating to each lobe
+tip and an optional cordate (heart) base notch.  `lobe_count: 1.0` with a
+shallow depth yields a plain ovate blade, so one generator covers both the
+palmate and simple-broadleaf families — a different leaf *form* from the
+pinnate, midrib-based leaf card.
+
+```rust
+use bevy_symbios_texture::broadleaf::BroadleafConfig;
+
+let config = BroadleafConfig {
+    seed: 0,
+    variant_rows: 1,       // atlas rows [1, 16]
+    variant_cols: 1,
+    color_base: [0.13, 0.26, 0.08],
+    color_edge: [0.28, 0.38, 0.12],  // margin colour
+    lobe_count: 5.0,       // palmate lobes [1, 9]; 5 = maple, 3 = ivy
+    lobe_depth: 0.34,      // sinus depth between lobes [0, 0.8]
+    fan_angle: 78.0,       // fan half-angle, degrees [30, 110]
+    radius: 0.92,          // blade radius as cell fraction [0.3, 1]
+    base_notch: 0.18,      // cordate basal notch depth [0, 0.5]; 0 = wedge
+    vein_width: 0.05,      // radiating main-vein width [0.01, 0.2]
+    petiole_length: 0.1,   // V-axis fraction reserved for the stalk [0, 0.3]
+    normal_strength: 1.4,
+};
+```
+
 ## Evolutionary parameter search (genetics)
 
 All config types implement `symbios_genetics::Genotype`, making them
@@ -1261,7 +1476,7 @@ declarative macros (`impl_genotype!` / `impl_config_editor!`) rather than
 hand-written per-config boilerplate.  Each macro invocation declares the
 config struct, field kinds (seed, f64, colour, enum, etc.), and optional
 post-hooks for tiling-invariant fixups, keeping the per-config call site
-small while covering all 40 config types.
+small while covering all 48 config types.
 
 `TextureConfig` itself also implements `Genotype` (mutation delegates to the
 wrapped config; crossover recombines like variants field-wise) and exposes
@@ -1273,6 +1488,14 @@ criterion bench suite are built entirely on these, so they extend
 automatically when a generator is added to the registry.
 
 ## Architecture
+
+The crate is a two-layer stack: the Bevy-free core —
+[`symbios-texture`](https://crates.io/crates/symbios-texture) — owns
+everything in the diagram below and is re-exported wholesale, while this
+wrapper adds the Bevy layer on top: `SymbiosTexturePlugin`, the async
+generation pool, the `Image` upload adapters (`map_to_images` /
+`map_to_images_card`), the `TextureCache` resource, the
+procedural-material builder, and the egui editors.
 
 ```text
 TextureGenerator (trait)
@@ -1301,6 +1524,9 @@ TextureGenerator (trait)
     ├── SnowGenerator       ─── FBM drift relief + sparkle flecks
     ├── IceGenerator        ─── sinusoidal crack veins + frost patches
     ├── LavaGenerator       ─── toroidal Voronoi plates + emissive crack glow
+    ├── MossGenerator       ─── ToroidalNoise FBM × 3 (cushion/filament/dry)
+    ├── LichenGenerator     ─── ToroidalNoise FBM (thresholded thallus patches)
+    ├── CactusSkinGenerator ─── periodic rib/areole lattice + sinusoid mottle
     │
     │  Alpha-masked cards
     ├── LeafGenerator       ─── LeafSampler (silhouette + venation)
@@ -1321,7 +1547,12 @@ TextureGenerator (trait)
     ├── ShardGenerator      ─── jittered polygon chip + grain FBM
     ├── LeafSpriteGenerator ─── LeafSampler atlas (per-cell leaf variants)
     ├── FlameGenerator      ─── teardrop envelope + FBM turbulence
-    └── FlowerGenerator     ─── PetalCell × N (radial composite blossom)
+    ├── FlowerGenerator     ─── PetalCell × N (radial composite blossom)
+    ├── GrassTuftGenerator  ─── fanned, curved blade ribbons
+    ├── FrondGenerator      ─── lanceolate pinna + pinnate veins
+    ├── ReedGenerator       ─── strap leaves + catkin spikes
+    ├── NeedleGenerator     ─── paired-needle conifer shoot
+    └── BroadleafGenerator  ─── polar palmate silhouette + radiating veins
                                 │
                         height_to_normal() → normal map
                         linear_to_srgb()   → albedo encoding
@@ -1344,7 +1575,7 @@ to produce size variants of the same material) skips the initialisation cost.
 construct it locally — and, since generation is row-parallel, once per row
 inside the parallel loop (the construction cost is microseconds against the
 per-row pixel work).  The foliage cards (`LeafGenerator`, `TwigGenerator` —
-leaf sampling also uses Worley) and the sprite generators hold only their
+leaf sampling also uses Worley) and the atlas generators hold only their
 config and build their samplers per `generate()` call.  The cell-decomposition
 surfaces (`CobblestoneGenerator`, `LavaGenerator`) instead use a dependency-free,
 `Sync` hash-based toroidal Voronoi (`noise::toroidal_voronoi`).
@@ -1370,8 +1601,8 @@ resolve to the same 4-D point, guaranteeing zero-seam tiling.
 
 **Normal maps** are derived from the height field via central-difference
 gradients.  For the tileable surface textures the neighbours wrap toroidally,
-so the normals are also seamless.  For card textures (leaf, twig, window,
-stained glass, iron grille, and all sprites) the boundary uses clamp-to-edge
+so the normals are also seamless.  For card textures (the foliage and
+architectural cards and the whole atlas family) the boundary uses clamp-to-edge
 so normals do not bleed across the transparent silhouette border.  Sprite
 atlases additionally dilate heights into fully-transparent texels before
 derivation so the normals do not crease at silhouette edges.
@@ -1406,7 +1637,7 @@ Displays an interactive material viewer with three columns: **albedo** (left),
 material applied.  Tileable surface textures are shown on a spinning cube;
 alpha-masked cards and sprite atlases get a gently swaying alpha-blended quad
 in front of a checkerboard backdrop instead, so per-pixel alpha is visible.
-An egui panel on the left lets you select any of the 40 generators from a
+An egui panel on the left lets you select any of the 48 generators from a
 dropdown, trigger a random **Mutate** (rate = 0.3), and edit every parameter
 live.
 

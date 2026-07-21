@@ -118,8 +118,8 @@ pub fn map_to_images_with_usages(
 
 /// Upload a [`TextureMap`] into [`Assets<Image>`] with clamp-to-edge samplers.
 ///
-/// Use this for alpha-masked cards (leaf, twig, window, stained glass, iron
-/// grille) and sprite atlases, where the texture must not tile and the alpha
+/// Use this for alpha-masked cards (foliage, windows, grilles) and sprite
+/// atlases, where the texture must not tile and the alpha
 /// silhouette must not bleed across edges.  For tileable surfaces use
 /// [`map_to_images`] instead.
 ///

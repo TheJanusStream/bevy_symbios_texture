@@ -17,26 +17,29 @@
 //! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
 //! metal, shingle, pavers, stucco, ashlar, cobblestone, thatch, marble,
 //! corrugated, asphalt, wainscoting, encaustic, fabric, sand, snow, ice,
-//! lava): wrap seamlessly via toroidal 4-D noise mapping.  Upload with
-//! [`map_to_images`] to get repeat-wrapping samplers.  `lava` additionally
-//! produces an emissive (glow) map.
+//! lava, moss, lichen, cactus skin): wrap seamlessly via toroidal 4-D noise
+//! mapping.  Upload with [`map_to_images`] to get repeat-wrapping samplers.
+//! `lava` additionally produces an emissive (glow) map.
 //!
 //! **Alpha-masked cards** (leaf, twig, window, stained_glass, iron_grille,
 //! chain_link, log_end): produce silhouettes with per-pixel alpha that must
 //! not tile.  Upload with [`map_to_images_card`] to get clamp-to-edge
 //! samplers.
 //!
-//! **Sprite atlases** (soft_disc, spark, snowflake, puff, ring, petal,
-//! shard, leaf_sprite, flame, flower): alpha-silhouette cards aimed at
-//! particle billboards.  Each can bake a `variant_rows × variant_cols`
+//! **Sprite atlases** — particle sprites (soft_disc, spark, snowflake,
+//! puff, ring, petal, shard, flame, flower) and foliage billboards
+//! (leaf_sprite, grass tuft, frond, reed, needle, broadleaf): alpha-silhouette
+//! cards for billboards.  Each can bake a `variant_rows × variant_cols`
 //! atlas where every cell renders a per-cell-seeded variant of the same
 //! config — one bake gives a particle system per-particle shape variety via
-//! random atlas frames.  Shared conventions live in [`sprite`]; upload with
+//! random atlas frames; the foliage billboards default to a single `1 × 1`
+//! card.  Shared conventions live in [`sprite`]; upload with
 //! [`map_to_images_card`].
 //!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
-//! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness/ORM).
+//! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness/ORM, and
+//! an optional emissive map).
 //!
 //! Seamless tiling for surface textures is guaranteed by the [`ToroidalNoise`]
 //! wrapper, which maps 2-D UV coordinates to a 4-D torus so noise wraps at

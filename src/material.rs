@@ -9,8 +9,9 @@
 //! and dispatches the texture-generation work in the background.  When the
 //! generator finishes, [`patch_procedural_material_textures`] (registered
 //! automatically by [`SymbiosTexturePlugin`](crate::SymbiosTexturePlugin))
-//! writes the resulting albedo, normal, and ORM images directly into the
-//! same material — callers never touch raw [`PendingTexture`] entities.
+//! writes the resulting albedo, normal, ORM, and (when produced) emissive
+//! images directly into the same material — callers never touch raw
+//! [`PendingTexture`] entities.
 //!
 //! Optional caching is provided by inserting a [`TextureCache`] resource
 //! before the helper runs.  Cache hits return the previous handles without
