@@ -32,6 +32,7 @@ use crate::ashlar::AshlarConfig;
 use crate::asphalt::AsphaltConfig;
 use crate::bark::BarkConfig;
 use crate::brick::BrickConfig;
+use crate::cactus::CactusSkinConfig;
 use crate::chain_link::ChainLinkConfig;
 use crate::cobblestone::CobblestoneConfig;
 use crate::concrete::ConcreteConfig;
@@ -40,6 +41,8 @@ use crate::encaustic::{EncausticConfig, EncausticPattern};
 use crate::fabric::FabricConfig;
 use crate::flame::FlameConfig;
 use crate::flower::FlowerConfig;
+use crate::frond::FrondConfig;
+use crate::grass::GrassTuftConfig;
 use crate::ground::GroundConfig;
 use crate::ice::IceConfig;
 use crate::iron_grille::IronGrilleConfig;
@@ -789,6 +792,66 @@ impl_config_editor!(
 );
 
 impl_config_editor!(
+    /// Renders all [`CactusSkinConfig`] parameters inside a collapsing header.
+    fn cactus_config_editor, CactusSkinConfig, "Cactus Skin Config" => {
+        u32("Seed", seed),
+        usize("Rib Count", rib_count, 3..=40),
+        usize("Areole Rows", areole_rows, 2..=40),
+        slider("Rib Depth", rib_depth, 0.0..=1.0),
+        slider("Rib Sharpness", rib_sharpness, 0.3..=3.0),
+        color("Skin Color", color_skin),
+        color("Valley Color", color_valley),
+        color("Areole Color", color_areole),
+        color("Spine Color", color_spine),
+        slider("Areole Size", areole_size, 0.005..=0.08),
+        slider("Spine Reach", spine_reach, 1.0..=6.0),
+        usize("Spine Count", spine_count, 0..=24),
+        slider("Waxiness", waxiness, 0.0..=1.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`FrondConfig`] parameters inside a collapsing header.
+    fn frond_config_editor, FrondConfig, "Frond Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Base Color", color_base),
+        color("Edge Color", color_edge),
+        slider("Width", width, 0.04..=0.3),
+        slider("Tip Taper", tip_taper, 0.4..=3.0),
+        slider("Midrib Width", midrib_width, 0.05..=0.5),
+        slider("Vein Count", vein_count, 0.0..=20.0),
+        slider("Lobe Count", lobe_count, 0.0..=12.0),
+        slider("Lobe Depth", lobe_depth, 0.0..=0.6),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`GrassTuftConfig`] parameters inside a collapsing header.
+    fn grass_config_editor, GrassTuftConfig, "Grass Tuft Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        usize("Blade Count", blade_count, 1..=24),
+        color("Base Color", color_base),
+        color("Tip Color", color_tip),
+        color("Dry Color", color_dry),
+        slider("Blade Width", blade_width, 0.01..=0.12),
+        slider("Blade Taper", blade_taper, 0.5..=4.0),
+        slider("Height Min", height_min, 0.2..=1.0),
+        slider("Height Max", height_max, 0.2..=1.0),
+        slider("Fan Spread", fan_spread, 0.0..=0.5),
+        slider("Curve", curve, 0.0..=0.5),
+        slider("Base Spread", base_spread, 0.0..=0.4),
+        slider("Dry Fraction", dry_fraction, 0.0..=1.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
     /// Renders all [`PetalConfig`] parameters inside a collapsing header.
     fn petal_config_editor, PetalConfig, "Petal Config" => {
         u32("Seed", seed),
@@ -875,6 +938,9 @@ pub fn texture_config_editor(
         TC::LeafSprite(c) => leaf_sprite_config_editor(ui, c, id),
         TC::Flame(c) => flame_config_editor(ui, c, id),
         TC::Flower(c) => flower_config_editor(ui, c, id),
+        TC::GrassTuft(c) => grass_config_editor(ui, c, id),
+        TC::Frond(c) => frond_config_editor(ui, c, id),
+        TC::CactusSkin(c) => cactus_config_editor(ui, c, id),
         TC::Fabric(c) => fabric_config_editor(ui, c, id),
         TC::Sand(c) => sand_config_editor(ui, c, id),
         TC::Snow(c) => snow_config_editor(ui, c, id),
