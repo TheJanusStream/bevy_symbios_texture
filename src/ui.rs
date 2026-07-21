@@ -32,6 +32,7 @@ use crate::ashlar::AshlarConfig;
 use crate::asphalt::AsphaltConfig;
 use crate::bark::BarkConfig;
 use crate::brick::BrickConfig;
+use crate::broadleaf::BroadleafConfig;
 use crate::cactus::CactusSkinConfig;
 use crate::chain_link::ChainLinkConfig;
 use crate::cobblestone::CobblestoneConfig;
@@ -49,13 +50,17 @@ use crate::iron_grille::IronGrilleConfig;
 use crate::lava::LavaConfig;
 use crate::leaf::LeafConfig;
 use crate::leaf_sprite::LeafSpriteConfig;
+use crate::lichen::LichenConfig;
 use crate::log_end::LogEndConfig;
 use crate::marble::MarbleConfig;
 use crate::metal::{MetalConfig, MetalStyle};
+use crate::moss::MossConfig;
+use crate::needle::NeedleConfig;
 use crate::pavers::{PaversConfig, PaversLayout};
 use crate::petal::PetalConfig;
 use crate::plank::PlankConfig;
 use crate::puff::PuffConfig;
+use crate::reed::ReedConfig;
 use crate::ring::RingConfig;
 use crate::rock::RockConfig;
 use crate::sand::SandConfig;
@@ -852,6 +857,106 @@ impl_config_editor!(
 );
 
 impl_config_editor!(
+    /// Renders all [`MossConfig`] parameters inside a collapsing header.
+    fn moss_config_editor, MossConfig, "Moss Config" => {
+        u32("Seed", seed),
+        slider("Cushion Scale", cushion_scale, 0.5..=16.0),
+        usize("Cushion Octaves", cushion_octaves, 1..=10),
+        slider("Filament Scale", filament_scale, 4.0..=64.0),
+        usize("Filament Octaves", filament_octaves, 1..=10),
+        slider("Filament Weight", filament_weight, 0.0..=1.0),
+        color("Deep Color", color_deep),
+        color("Tip Color", color_tip),
+        color("Dry Color", color_dry),
+        slider("Dry Patches", dry_patches, 0.0..=1.0),
+        slider("Dry Scale", dry_scale, 0.5..=12.0),
+        slider("Cushion Depth", cushion_depth, 0.0..=1.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`LichenConfig`] parameters inside a collapsing header.
+    fn lichen_config_editor, LichenConfig, "Lichen Config" => {
+        u32("Seed", seed),
+        slider("Patch Scale", patch_scale, 0.5..=16.0),
+        usize("Patch Octaves", patch_octaves, 1..=10),
+        slider("Coverage", coverage, 0.0..=1.0),
+        slider("Rim Width", rim_width, 0.0..=0.4),
+        slider("Species Scale", species_scale, 0.3..=8.0),
+        color("Rock Color", color_rock),
+        color("Lichen Color A", color_lichen_a),
+        color("Lichen Color B", color_lichen_b),
+        color("Rim Color", color_rim),
+        slider("Grain Scale", grain_scale, 4.0..=80.0),
+        slider("Grain Strength", grain_strength, 0.0..=1.0),
+        slider("Relief", relief, 0.0..=1.0),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ReedConfig`] parameters inside a collapsing header.
+    fn reed_config_editor, ReedConfig, "Reed Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        usize("Blade Count", blade_count, 1..=12),
+        color("Base Color", color_base),
+        color("Tip Color", color_tip),
+        color("Catkin Color", color_catkin),
+        slider("Blade Width", blade_width, 0.008..=0.08),
+        slider("Height Min", height_min, 0.3..=1.0),
+        slider("Height Max", height_max, 0.3..=1.0),
+        slider("Lean", lean, 0.0..=0.3),
+        slider("Tip Fraction", tip_fraction, 0.05..=0.8),
+        slider("Catkin Share", catkin_share, 0.0..=1.0),
+        slider("Catkin Length", catkin_length, 0.0..=0.4),
+        slider("Catkin Width", catkin_width, 0.005..=0.06),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`NeedleConfig`] parameters inside a collapsing header.
+    fn needle_config_editor, NeedleConfig, "Needle Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        usize("Pair Count", pair_count, 1..=24),
+        color("Base Color", color_base),
+        color("Tip Color", color_tip),
+        color("Shoot Color", color_shoot),
+        slider("Needle Angle", needle_angle, 5.0..=85.0),
+        slider("Needle Length", needle_length, 0.05..=0.6),
+        slider("Needle Width", needle_width, 0.002..=0.03),
+        slider("Length Taper", length_taper, 0.0..=1.0),
+        slider("Shoot Length", shoot_length, 0.2..=1.0),
+        slider("Shoot Width", shoot_width, 0.002..=0.04),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`BroadleafConfig`] parameters inside a collapsing header.
+    fn broadleaf_config_editor, BroadleafConfig, "Broadleaf Config" => {
+        u32("Seed", seed),
+        usize("Variant Rows", variant_rows, 1..=16),
+        usize("Variant Cols", variant_cols, 1..=16),
+        color("Base Color", color_base),
+        color("Edge Color", color_edge),
+        slider_step("Lobe Count", lobe_count, 1.0..=9.0, 1.0),
+        slider("Lobe Depth", lobe_depth, 0.0..=0.8),
+        slider("Fan Angle", fan_angle, 30.0..=110.0),
+        slider("Radius", radius, 0.3..=1.0),
+        slider("Base Notch", base_notch, 0.0..=0.5),
+        slider("Vein Width", vein_width, 0.01..=0.2),
+        slider("Petiole Length", petiole_length, 0.0..=0.3),
+        slider("Normal Strength", normal_strength, 0.0..=4.0),
+    }
+);
+
+impl_config_editor!(
     /// Renders all [`PetalConfig`] parameters inside a collapsing header.
     fn petal_config_editor, PetalConfig, "Petal Config" => {
         u32("Seed", seed),
@@ -941,6 +1046,11 @@ pub fn texture_config_editor(
         TC::GrassTuft(c) => grass_config_editor(ui, c, id),
         TC::Frond(c) => frond_config_editor(ui, c, id),
         TC::CactusSkin(c) => cactus_config_editor(ui, c, id),
+        TC::Moss(c) => moss_config_editor(ui, c, id),
+        TC::Lichen(c) => lichen_config_editor(ui, c, id),
+        TC::Reed(c) => reed_config_editor(ui, c, id),
+        TC::Needle(c) => needle_config_editor(ui, c, id),
+        TC::Broadleaf(c) => broadleaf_config_editor(ui, c, id),
         TC::Fabric(c) => fabric_config_editor(ui, c, id),
         TC::Sand(c) => sand_config_editor(ui, c, id),
         TC::Snow(c) => snow_config_editor(ui, c, id),
