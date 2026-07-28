@@ -398,6 +398,7 @@ impl_config_editor!(
         slider("Fuzz", fuzz, 0.0..=1.0),
         color("Warp Color", color_warp),
         color("Weft Color", color_weft),
+        nested(weathering_config_editor, weathering, "fabric_weather"),
         slider("Normal Strength", normal_strength, 0.5..=6.0),
     }
 );
@@ -529,6 +530,7 @@ impl_config_editor!(
         slider("Surface Roughness", roughness, 0.0..=1.0),
         color("Brick Color", color_brick),
         color("Mortar Color", color_mortar),
+        nested(weathering_config_editor, weathering, "brick_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -560,6 +562,7 @@ impl_config_editor!(
         slider("Moss", moss_level, 0.0..=1.0),
         color("Tile Color", color_tile),
         color("Grout Color", color_grout),
+        nested(weathering_config_editor, weathering, "shingle_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -573,6 +576,7 @@ impl_config_editor!(
         slider("Roughness", roughness, 0.0..=1.0),
         color("Base Color", color_base),
         color("Shadow Color", color_shadow),
+        nested(weathering_config_editor, weathering, "stucco_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );
@@ -589,6 +593,7 @@ impl_config_editor!(
         slider("Pit Density", pit_density, 0.0..=0.45),
         color("Base Color", color_base),
         color("Pit Color", color_pit),
+        nested(weathering_config_editor, weathering, "concrete_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );
@@ -616,6 +621,7 @@ impl_config_editor!(
         slider("Rust", rust_level, 0.0..=1.0),
         color("Metal Color", color_metal),
         color("Rust Color", color_rust),
+        nested(weathering_config_editor, weathering, "metal_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );
@@ -636,6 +642,7 @@ impl_config_editor!(
         slider("Surface Roughness", roughness, 0.0..=1.0),
         color("Stone Color", color_stone),
         color("Grout Color", color_grout),
+        nested(weathering_config_editor, weathering, "pavers_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -653,6 +660,7 @@ impl_config_editor!(
         slider("Roughness", roughness, 0.0..=1.0),
         color("Stone Color", color_stone),
         color("Mortar Color", color_mortar),
+        nested(weathering_config_editor, weathering, "ashlar_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -667,6 +675,7 @@ impl_config_editor!(
         slider("Roundness", roundness, 0.3..=2.5),
         color("Stone Color", color_stone),
         color("Mud Color", color_mud),
+        nested(weathering_config_editor, weathering, "cobblestone_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -682,6 +691,7 @@ impl_config_editor!(
         slider("Layer Shadow", layer_shadow, 0.0..=1.0),
         color("Straw Color", color_straw),
         color("Shadow Color", color_shadow),
+        nested(weathering_config_editor, weathering, "thatch_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );
@@ -699,6 +709,7 @@ impl_config_editor!(
         slider("Roughness", roughness, 0.0..=0.4),
         color("Base Color", color_base),
         color("Vein Color", color_vein),
+        nested(weathering_config_editor, weathering, "marble_weather"),
         slider("Normal Strength", normal_strength, 0.0..=4.0),
     }
 );
@@ -714,6 +725,7 @@ impl_config_editor!(
         slider("Metallic", metallic, 0.0..=1.0),
         color("Metal Color", color_metal),
         color("Rust Color", color_rust),
+        nested(weathering_config_editor, weathering, "corrugated_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );
@@ -729,6 +741,7 @@ impl_config_editor!(
         slider("Stain Level", stain_level, 0.0..=1.0),
         color("Base Color", color_base),
         color("Aggregate Color", color_aggregate),
+        nested(weathering_config_editor, weathering, "asphalt_weather"),
         slider("Normal Strength", normal_strength, 0.0..=4.0),
     }
 );
@@ -745,6 +758,7 @@ impl_config_editor!(
         slider("Grain Warp", grain_warp, 0.0..=1.0),
         color("Wood Light", color_wood_light),
         color("Wood Dark", color_wood_dark),
+        nested(weathering_config_editor, weathering, "wainscoting_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -792,6 +806,7 @@ impl_config_editor!(
         color("Color A", color_a),
         color("Color B", color_b),
         color("Grout Color", color_grout),
+        nested(weathering_config_editor, weathering, "encaustic_weather"),
         slider("Normal Strength", normal_strength, 0.0..=6.0),
     }
 );

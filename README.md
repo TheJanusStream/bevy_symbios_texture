@@ -17,13 +17,13 @@ cell is a per-cell-seeded variant of the same config.
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.4 – 0.8            | 0.18 |
+| 0.4 – 0.9            | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.8"
+bevy_symbios_texture = "0.9"
 ```
 
 The optional `egui` feature adds editor widgets for every config type
@@ -31,7 +31,7 @@ The optional `egui` feature adds editor widgets for every config type
 
 ```toml
 [dependencies]
-bevy_symbios_texture = { version = "0.8", features = ["egui"] }
+bevy_symbios_texture = { version = "0.9", features = ["egui"] }
 ```
 
 ## Quick start
@@ -1064,9 +1064,17 @@ let config = TruchetConfig {
 
 #### Weathering (shared)
 
-`RockConfig`, `EnamelConfig`, `ObsidianConfig`, `ChitinConfig`,
-`SolarPanelConfig`, `ParquetConfig` and `TruchetConfig` each carry an optional
-`weathering` block that ages the surface after it is generated.  Every layer
+Every generator depicting a **built or dressed** surface carries an optional
+`weathering` block that ages it after generation: ashlar, asphalt, brick,
+chitin, cobblestone, concrete, corrugated, enamel, encaustic, fabric, marble,
+metal, obsidian, parquet, pavers, rock, shingle, solar panel, stucco, thatch,
+truchet and wainscoting.
+
+Natural surfaces are deliberately excluded — sand, snow, moss, bark and their
+kin already read as weathered, and a second ageing pass over them fights the
+generator rather than helping it. `plank` is the one gap: it still hand-rolls
+its pixel loop instead of using the surface driver, so it cannot be handed a
+config yet.  Every layer
 defaults to an amount of zero, so an untouched block leaves the material
 exactly as the generator drew it and costs nothing to bake.
 
