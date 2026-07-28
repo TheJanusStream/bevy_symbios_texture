@@ -17,13 +17,13 @@ cell is a per-cell-seeded variant of the same config.
 
 | bevy_symbios_texture | Bevy |
 |----------------------|------|
-| 0.4 – 0.7            | 0.18 |
+| 0.4 – 0.8            | 0.18 |
 
 ## Installation
 
 ```toml
 [dependencies]
-bevy_symbios_texture = "0.7"
+bevy_symbios_texture = "0.8"
 ```
 
 The optional `egui` feature adds editor widgets for every config type
@@ -31,7 +31,7 @@ The optional `egui` feature adds editor widgets for every config type
 
 ```toml
 [dependencies]
-bevy_symbios_texture = { version = "0.7", features = ["egui"] }
+bevy_symbios_texture = { version = "0.8", features = ["egui"] }
 ```
 
 ## Quick start
@@ -818,6 +818,280 @@ let config = EncausticConfig {
     color_b: [0.22, 0.35, 0.65],  // secondary tile colour
     color_grout: [0.82, 0.80, 0.75],
     normal_strength: 3.0,
+};
+```
+
+#### Cracked earth
+
+Dried mud plates with curled rims, separated by cracks of *constant* width —
+the cheaper `F2 − F1` mask widens with the cell, giving large plates canyons
+and small ones hairlines.
+
+```rust
+use bevy_symbios_texture::cracked_earth::CrackedEarthConfig;
+
+let config = CrackedEarthConfig {
+    seed: 11,
+    scale: 7.0,            // plates across the tile [2, 20]
+    jitter: 0.85,          // plate irregularity [0, 1]
+    crack_width: 0.010,    // crack width in UV units (fraction of the tile)
+    crack_depth: 0.55,     // how far cracks cut into the height field
+    curl: 0.22,            // how far plate rims lift as they dry
+    curl_reach: 0.035,     // how far back from a crack the curl reaches (UV)
+    plate_variance: 0.10,  // per-plate tint spread [0, 1]
+    grain_scale: 26.0,
+    grain_strength: 0.12,
+    color_plate: [0.44, 0.33, 0.22],
+    color_crack: [0.13, 0.09, 0.06],
+    normal_strength: 3.0,
+};
+```
+
+#### Gravel
+
+Packed graded aggregate over dust.  Each stone is sized against the distance
+to its neighbour rather than a fixed radius, so it fills its own cell; the
+metric decides whether stones read as water-rounded shingle or crushed rock.
+
+```rust
+use bevy_symbios_texture::gravel::GravelConfig;
+use bevy_symbios_texture::noise::CellMetric;
+
+let config = GravelConfig {
+    seed: 23,
+    scale: 20.0,           // stones across the tile (≈20 roadbase, ≈8 ballast)
+    metric: CellMetric::Euclidean, // or Manhattan / Chebyshev for angular stone
+    jitter: 0.9,
+    roundness: 1.6,        // dome profile exponent
+    size_variance: 0.45,   // grading spread [0, 1]
+    cell_variance: 0.13,   // per-stone tint spread [0, 1]
+    fines_level: 0.55,     // dust filling the gaps [0, 1]
+    grain_scale: 60.0,
+    color_stone: [0.40, 0.38, 0.35],
+    color_dark: [0.17, 0.16, 0.15],
+    color_fines: [0.26, 0.24, 0.21],
+    normal_strength: 2.5,
+};
+```
+
+#### Forest floor
+
+Fallen leaf litter over humus.  Leaves are stamped as discrete objects and
+layered with a per-leaf depth so they interleave — noise-based "litter" has no
+edges you can follow around a single leaf.
+
+```rust
+use bevy_symbios_texture::forest_floor::ForestFloorConfig;
+
+let config = ForestFloorConfig {
+    seed: 31,
+    litter_scale: 7.0,     // leaves across the coarsest layer
+    layers: 3,             // stacked litter layers [1, 4]
+    coverage: 0.85,        // fraction of cells carrying a leaf [0, 1]
+    leaf_length: 1.15,     // multiple of the lattice cell
+    leaf_width: 0.5,       // multiple of the leaf length
+    leaf_thickness: 0.35,
+    midrib: 0.22,          // darkening of the leaf spine [0, 1]
+    humus_scale: 14.0,
+    color_humus: [0.09, 0.07, 0.05],
+    color_leaf: [0.46, 0.31, 0.12],
+    color_leaf_old: [0.22, 0.16, 0.09],
+    normal_strength: 2.2,
+};
+```
+
+#### Enamel
+
+A smooth fired glaze, optionally crazed.  Its character is the *absence* of
+directional structure, which is what a brushed-metal finish cannot fake.
+
+```rust
+use bevy_symbios_texture::enamel::EnamelConfig;
+
+let config = EnamelConfig {
+    seed: 17,
+    color: [0.62, 0.20, 0.16],       // fired glaze
+    color_body: [0.80, 0.78, 0.74],  // unglazed body, seen through the craze
+    gloss_roughness: 0.18,           // above ~0.4 reads as matt paint
+    metallic: 0.0,
+    crackle: 0.0,                    // 0 leaves the coat perfectly clear
+    crackle_scale: 26.0,
+    crackle_width: 0.0025,           // UV units, so the web stays hairline
+    orange_peel: 0.11,
+    orange_peel_scale: 34.0,
+    ..Default::default()             // `weathering`, `normal_strength`
+};
+```
+
+#### Obsidian
+
+Near-black polished glass carrying warped flow banding.  Keep `band_warp` well
+under half a turn: past that the bend exceeds half a band period and the bands
+fold back through one another instead of flowing.
+
+```rust
+use bevy_symbios_texture::obsidian::ObsidianConfig;
+
+let config = ObsidianConfig {
+    seed: 29,
+    color: [0.035, 0.032, 0.045],
+    color_sheen: [0.16, 0.15, 0.22],
+    band_cycles_u: 5.0,    // whole cycles; the field only tiles at integers
+    band_cycles_v: 2.0,
+    band_warp: 0.26,       // turns of phase — keep well under 0.5
+    band_warp_scale: 1.6,
+    band_sharpness: 0.35,
+    band_contrast: 0.8,
+    gloss_roughness: 0.12,
+    metallic: 0.6,
+    relief: 0.05,          // polished glass is nearly flat
+    ..Default::default()
+};
+```
+
+#### Chitin
+
+Carapace plating.  Built on a soft minimum so plates swell into one another
+rather than meeting at the crease a hard minimum gives; the suture is then
+drawn back in deliberately.
+
+```rust
+use bevy_symbios_texture::chitin::ChitinConfig;
+
+let config = ChitinConfig {
+    seed: 37,
+    scale: 6.0,            // plates across the tile
+    jitter: 0.75,
+    softness: 24.0,        // low merges plates, high approaches cut stone
+    plate_fill: 0.9,       // how far a plate swells toward its neighbour
+    plate_relief: 0.55,
+    seam_width: 0.006,     // UV units
+    seam_depth: 0.75,
+    iridescence: 0.22,     // per-plate sheen, applied as a multiplier
+    color: [0.20, 0.34, 0.20],
+    color_deep: [0.05, 0.09, 0.07],
+    gloss_roughness: 0.28,
+    metallic: 0.45,
+    pit_scale: 40.0,
+    ..Default::default()
+};
+```
+
+#### Solar panel
+
+Photovoltaic wafers behind glass.  The wiring is laid in cell-local space so
+it runs continuously across cells while the silicon does not — that continuity
+is what reads as a panel rather than a tiled floor.
+
+```rust
+use bevy_symbios_texture::solar_panel::SolarPanelConfig;
+
+let config = SolarPanelConfig {
+    seed: 41,
+    cells_x: 4.0,
+    cells_y: 4.0,
+    cell_gap: 0.06,        // fraction of a cell
+    corner_cut: 0.14,      // wafers are cut from a round ingot
+    busbars: 3.0,
+    busbar_width: 0.014,   // coverage is width × count — keep both small
+    fingers: 18.0,
+    finger_width: 0.003,
+    color_cell: [0.020, 0.030, 0.075],
+    color_backing: [0.72, 0.72, 0.70],
+    color_wire: [0.62, 0.63, 0.65],
+    cell_variance: 0.18,   // multiplicative, so near-black silicon stays dark
+    crystal_mottle: 0.30,
+    crystal_scale: 22.0,
+    glass_roughness: 0.10,
+    ..Default::default()
+};
+```
+
+#### Parquet
+
+Short boards laid in a repeating figure.  Herringbone is not a grid of blocks:
+a cell's board direction falls out of `(i − j) mod 2·aspect`, and because that
+key shifts along both axes the runs interlock into the zig-zag.
+
+```rust
+use bevy_symbios_texture::parquet::{ParquetConfig, ParquetLayout};
+
+let config = ParquetConfig {
+    seed: 43,
+    layout: ParquetLayout::Herringbone, // or Basket, Brick
+    scale: 8.0,            // board slots across the tile
+    aspect: 4.0,           // board length as a multiple of its width
+    joint_width: 0.05,
+    joint_depth: 0.5,
+    grain_lines: 7.0,
+    grain_contrast: 0.35,
+    grain_warp: 0.22,
+    board_variance: 0.13,
+    color_wood: [0.36, 0.20, 0.09],
+    color_grain: [0.19, 0.10, 0.04],
+    color_joint: [0.07, 0.04, 0.02],
+    gloss_roughness: 0.32,
+    ..Default::default()
+};
+```
+
+#### Truchet
+
+Hashed quarter-arcs that meet at every tile edge whichever way the neighbour
+fell, so a grid of coin flips reads as one routed network.  The emissive
+channel is only collected when `emissive_intensity` is above zero.
+
+```rust
+use bevy_symbios_texture::truchet::TruchetConfig;
+
+let config = TruchetConfig {
+    seed: 47,
+    scale: 6.0,            // tiles across the panel
+    trace_width: 0.09,     // fraction of a tile
+    trace_relief: 0.6,
+    density: 0.85,         // below 1 the network breaks into runs and stubs
+    color_panel: [0.035, 0.055, 0.050],
+    color_trace: [0.16, 0.42, 0.34],
+    color_glow: [0.10, 0.85, 0.60],
+    emissive_intensity: 1.0, // 0 skips the emissive buffer entirely
+    panel_roughness: 0.72,
+    trace_roughness: 0.30,
+    trace_metallic: 0.65,
+    mottle_scale: 18.0,
+    ..Default::default()
+};
+```
+
+#### Weathering (shared)
+
+`RockConfig`, `EnamelConfig`, `ObsidianConfig`, `ChitinConfig`,
+`SolarPanelConfig`, `ParquetConfig` and `TruchetConfig` each carry an optional
+`weathering` block that ages the surface after it is generated.  Every layer
+defaults to an amount of zero, so an untouched block leaves the material
+exactly as the generator drew it and costs nothing to bake.
+
+Layers are applied in the order material actually ages: edge wear rubs raised
+arrises back to the substrate, corrosion creeps out of crevices (adding its own
+crust relief), grime settles into recesses, and runoff streaks draw down from
+ledges.
+
+```rust
+use bevy_symbios_texture::rock::RockConfig;
+use bevy_symbios_texture::weathering::{Streaks, WeatheringConfig};
+
+let config = RockConfig {
+    weathering: WeatheringConfig {
+        seed: 4,
+        streaks: Streaks {
+            amount: 0.9,
+            density: 0.5,  // fraction of candidate ledges that actually run
+            length: 0.35,  // fraction of the tile height, so it survives a
+                           // change of bake resolution
+            ..Default::default()
+        },
+        ..Default::default()
+    },
+    ..Default::default()
 };
 ```
 

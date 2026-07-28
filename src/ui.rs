@@ -35,15 +35,20 @@ use crate::brick::BrickConfig;
 use crate::broadleaf::BroadleafConfig;
 use crate::cactus::CactusSkinConfig;
 use crate::chain_link::ChainLinkConfig;
+use crate::chitin::ChitinConfig;
 use crate::cobblestone::CobblestoneConfig;
 use crate::concrete::ConcreteConfig;
 use crate::corrugated::CorrugatedConfig;
+use crate::cracked_earth::CrackedEarthConfig;
+use crate::enamel::EnamelConfig;
 use crate::encaustic::{EncausticConfig, EncausticPattern};
-use crate::fabric::FabricConfig;
+use crate::fabric::{FabricConfig, WeaveKind};
 use crate::flame::FlameConfig;
 use crate::flower::FlowerConfig;
+use crate::forest_floor::ForestFloorConfig;
 use crate::frond::FrondConfig;
 use crate::grass::GrassTuftConfig;
+use crate::gravel::GravelConfig;
 use crate::ground::GroundConfig;
 use crate::ice::IceConfig;
 use crate::iron_grille::IronGrilleConfig;
@@ -56,6 +61,9 @@ use crate::marble::MarbleConfig;
 use crate::metal::{MetalConfig, MetalStyle};
 use crate::moss::MossConfig;
 use crate::needle::NeedleConfig;
+use crate::noise::CellMetric;
+use crate::obsidian::ObsidianConfig;
+use crate::parquet::{ParquetConfig, ParquetLayout};
 use crate::pavers::{PaversConfig, PaversLayout};
 use crate::petal::PetalConfig;
 use crate::plank::PlankConfig;
@@ -69,12 +77,15 @@ use crate::shingle::ShingleConfig;
 use crate::snow::SnowConfig;
 use crate::snowflake::SnowflakeConfig;
 use crate::soft_disc::SoftDiscConfig;
+use crate::solar_panel::SolarPanelConfig;
 use crate::spark::SparkConfig;
 use crate::stained_glass::StainedGlassConfig;
 use crate::stucco::StuccoConfig;
 use crate::thatch::ThatchConfig;
+use crate::truchet::TruchetConfig;
 use crate::twig::TwigConfig;
 use crate::wainscoting::WainscotingConfig;
+use crate::weathering::{Corrosion, CreviceDirt, EdgeWear, Streaks, WeatheringConfig};
 use crate::window::WindowConfig;
 
 // ---------------------------------------------------------------------------
@@ -185,6 +196,72 @@ macro_rules! impl_config_editor {
 // ---------------------------------------------------------------------------
 // Editor implementations — one macro invocation per config type
 // ---------------------------------------------------------------------------
+
+// Weathering layer editors — embedded by every generator that can age
+
+impl_config_editor!(
+    /// Renders all [`EdgeWear`] parameters inside a collapsing header.
+    fn edge_wear_editor, EdgeWear, "Edge Wear" => {
+        slider("Amount", amount, 0.0..=1.0),
+        color("Substrate Color", color),
+        slider("Threshold", threshold, 0.0..=1.0),
+        slider("Breakup Scale", breakup_scale, 1.0..=32.0),
+        slider("Roughness", roughness, 0.0..=1.0),
+        slider("Metallic", metallic, 0.0..=1.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`Corrosion`] parameters inside a collapsing header.
+    fn corrosion_editor, Corrosion, "Corrosion" => {
+        slider("Amount", amount, 0.0..=1.0),
+        color("Corrosion Color", color),
+        slider("Coverage", coverage, 0.0..=1.0),
+        slider("Spread", spread, 0.0..=0.25),
+        slider("Barrier Scale", barrier_scale, 1.0..=24.0),
+        slider("Crust Relief", relief, 0.0..=0.5),
+        slider("Roughness", roughness, 0.0..=1.0),
+        slider("Metallic", metallic, 0.0..=1.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`CreviceDirt`] parameters inside a collapsing header.
+    fn crevice_dirt_editor, CreviceDirt, "Crevice Dirt" => {
+        slider("Amount", amount, 0.0..=1.0),
+        color("Grime Color", color),
+        slider("Depth", depth, 0.005..=0.25),
+        slider("Gravity", gravity, 0.0..=1.0),
+        slider("Roughness", roughness, 0.0..=1.0),
+        slider("Occlusion", occlusion, 0.0..=1.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`Streaks`] parameters inside a collapsing header.
+    fn streaks_editor, Streaks, "Streaks" => {
+        slider("Amount", amount, 0.0..=1.0),
+        color("Stain Color", color),
+        slider("Density", density, 0.0..=1.0),
+        slider("Length", length, 0.0..=1.0),
+        slider("Wander", wander, 0.0..=4.0),
+        slider("Roughness", roughness, 0.0..=1.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`WeatheringConfig`] layers inside a collapsing header.
+    ///
+    /// Every layer defaults to an amount of zero, so an untouched weathering
+    /// block leaves the material exactly as the generator drew it.
+    fn weathering_config_editor, WeatheringConfig, "Weathering" => {
+        u32("Seed", seed),
+        nested(edge_wear_editor, edge_wear, "weather_wear"),
+        nested(corrosion_editor, corrosion, "weather_corrosion"),
+        nested(crevice_dirt_editor, crevice_dirt, "weather_dirt"),
+        nested(streaks_editor, streaks, "weather_streaks"),
+    }
+);
 
 // Foliage card editors
 
@@ -309,6 +386,12 @@ impl_config_editor!(
     /// Renders all [`FabricConfig`] parameters inside a collapsing header.
     fn fabric_config_editor, FabricConfig, "Fabric Config" => {
         u32("Seed", seed),
+        enum_select("Weave:", weave, [
+            ("Plain", WeaveKind::Plain),
+            ("Twill", WeaveKind::Twill),
+            ("Satin", WeaveKind::Satin),
+            ("Basket", WeaveKind::Basket)
+        ]),
         slider("Thread Count", thread_count, 8.0..=64.0),
         slider("Thread Width", thread_width, 0.3..=0.98),
         slider("Weave Contrast", weave_contrast, 0.0..=1.0),
@@ -428,6 +511,7 @@ impl_config_editor!(
         slider("Attenuation", attenuation, 0.5..=6.0),
         color("Color Gaps", color_light),
         color("Color Stone", color_dark),
+        nested(weathering_config_editor, weathering, "rock_weather"),
         slider("Normal Strength", normal_strength, 0.0..=8.0),
     }
 );
@@ -517,12 +601,16 @@ impl_config_editor!(
             ("Brushed", MetalStyle::Brushed),
             ("Standing Seam", MetalStyle::StandingSeam),
             ("Hammered", MetalStyle::Hammered),
-            ("Diamond Plate", MetalStyle::DiamondPlate)
+            ("Diamond Plate", MetalStyle::DiamondPlate),
+            ("Riveted", MetalStyle::Riveted),
+            ("Perforated", MetalStyle::Perforated)
         ]),
         slider("Scale", scale, 1.0..=16.0),
         slider_step("Seam Count", seam_count, 1.0..=16.0, 1.0),
         slider("Seam Sharpness", seam_sharpness, 0.5..=6.0),
         slider("Brush Stretch", brush_stretch, 1.0..=20.0),
+        slider("Rivet Size", rivet_size, 0.05..=0.9),
+        slider("Hole Size", hole_size, 0.05..=0.9),
         slider("Roughness", roughness, 0.0..=1.0),
         slider("Metallic", metallic, 0.0..=1.0),
         slider("Rust", rust_level, 0.0..=1.0),
@@ -995,6 +1083,200 @@ impl_config_editor!(
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+// Terrain and catalogue editors added in 0.8
+
+impl_config_editor!(
+    /// Renders all [`CrackedEarthConfig`] parameters inside a collapsing header.
+    fn cracked_earth_config_editor, CrackedEarthConfig, "Cracked Earth Config" => {
+        u32("Seed", seed),
+        slider("Plates", scale, 2.0..=20.0),
+        slider("Jitter", jitter, 0.0..=1.0),
+        slider("Crack Width", crack_width, 0.001..=0.03),
+        slider("Crack Depth", crack_depth, 0.0..=1.5),
+        slider("Curl", curl, 0.0..=0.8),
+        slider("Curl Reach", curl_reach, 0.005..=0.12),
+        slider("Plate Variance", plate_variance, 0.0..=0.4),
+        slider("Grain Scale", grain_scale, 4.0..=64.0),
+        slider("Grain Strength", grain_strength, 0.0..=0.5),
+        color("Plate Color", color_plate),
+        color("Crack Color", color_crack),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`GravelConfig`] parameters inside a collapsing header.
+    fn gravel_config_editor, GravelConfig, "Gravel Config" => {
+        u32("Seed", seed),
+        enum_select("Stone Shape:", metric, [
+            ("Rounded", CellMetric::Euclidean),
+            ("Diamond", CellMetric::Manhattan),
+            ("Angular", CellMetric::Chebyshev)
+        ]),
+        slider("Stones", scale, 4.0..=64.0),
+        slider("Jitter", jitter, 0.0..=1.0),
+        slider("Roundness", roundness, 0.2..=4.0),
+        slider("Size Variance", size_variance, 0.0..=1.0),
+        slider("Tint Variance", cell_variance, 0.0..=0.5),
+        slider("Fines", fines_level, 0.0..=1.0),
+        slider("Grain Scale", grain_scale, 8.0..=128.0),
+        color("Stone Color", color_stone),
+        color("Shadow Color", color_dark),
+        color("Fines Color", color_fines),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ForestFloorConfig`] parameters inside a collapsing header.
+    fn forest_floor_config_editor, ForestFloorConfig, "Forest Floor Config" => {
+        u32("Seed", seed),
+        slider("Litter Scale", litter_scale, 2.0..=24.0),
+        usize("Layers", layers, 1..=4),
+        slider("Coverage", coverage, 0.0..=1.0),
+        slider("Leaf Length", leaf_length, 0.3..=2.5),
+        slider("Leaf Width", leaf_width, 0.1..=1.0),
+        slider("Leaf Thickness", leaf_thickness, 0.0..=1.0),
+        slider("Midrib", midrib, 0.0..=1.0),
+        slider("Humus Scale", humus_scale, 2.0..=48.0),
+        color("Humus Color", color_humus),
+        color("Fresh Leaf", color_leaf),
+        color("Old Leaf", color_leaf_old),
+        slider("Normal Strength", normal_strength, 0.5..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`EnamelConfig`] parameters inside a collapsing header.
+    fn enamel_config_editor, EnamelConfig, "Enamel Config" => {
+        u32("Seed", seed),
+        color("Glaze Color", color),
+        color("Body Color", color_body),
+        slider("Gloss", gloss_roughness, 0.0..=1.0),
+        slider("Metallic", metallic, 0.0..=1.0),
+        slider("Crackle", crackle, 0.0..=1.0),
+        slider("Crackle Scale", crackle_scale, 4.0..=64.0),
+        slider("Crackle Width", crackle_width, 0.0005..=0.02),
+        slider("Orange Peel", orange_peel, 0.0..=0.4),
+        slider("Peel Scale", orange_peel_scale, 4.0..=80.0),
+        nested(weathering_config_editor, weathering, "enamel_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ObsidianConfig`] parameters inside a collapsing header.
+    fn obsidian_config_editor, ObsidianConfig, "Obsidian Config" => {
+        u32("Seed", seed),
+        color("Body Color", color),
+        color("Sheen Color", color_sheen),
+        slider_step("Band Cycles U", band_cycles_u, 0.0..=24.0, 1.0),
+        slider_step("Band Cycles V", band_cycles_v, 0.0..=24.0, 1.0),
+        slider("Band Warp", band_warp, 0.0..=1.0),
+        slider("Warp Scale", band_warp_scale, 0.5..=12.0),
+        slider("Band Sharpness", band_sharpness, 0.0..=1.0),
+        slider("Band Contrast", band_contrast, 0.0..=1.0),
+        slider("Gloss", gloss_roughness, 0.0..=1.0),
+        slider("Metallic", metallic, 0.0..=1.0),
+        slider("Relief", relief, 0.0..=0.5),
+        nested(weathering_config_editor, weathering, "obsidian_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ChitinConfig`] parameters inside a collapsing header.
+    fn chitin_config_editor, ChitinConfig, "Chitin Config" => {
+        u32("Seed", seed),
+        slider("Plates", scale, 2.0..=24.0),
+        slider("Jitter", jitter, 0.0..=1.0),
+        slider("Softness", softness, 2.0..=200.0),
+        slider("Plate Fill", plate_fill, 0.05..=1.0),
+        slider("Plate Relief", plate_relief, 0.0..=1.5),
+        slider("Seam Width", seam_width, 0.0005..=0.05),
+        slider("Seam Depth", seam_depth, 0.0..=1.0),
+        slider("Iridescence", iridescence, 0.0..=0.6),
+        color("Shell Color", color),
+        color("Deep Color", color_deep),
+        slider("Gloss", gloss_roughness, 0.0..=1.0),
+        slider("Metallic", metallic, 0.0..=1.0),
+        slider("Pit Scale", pit_scale, 6.0..=96.0),
+        nested(weathering_config_editor, weathering, "chitin_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`SolarPanelConfig`] parameters inside a collapsing header.
+    fn solar_panel_config_editor, SolarPanelConfig, "Solar Panel Config" => {
+        u32("Seed", seed),
+        slider_step("Cells X", cells_x, 1.0..=16.0, 1.0),
+        slider_step("Cells Y", cells_y, 1.0..=16.0, 1.0),
+        slider("Cell Gap", cell_gap, 0.0..=0.4),
+        slider("Corner Cut", corner_cut, 0.0..=0.5),
+        slider_step("Busbars", busbars, 0.0..=8.0, 1.0),
+        slider("Busbar Width", busbar_width, 0.0..=0.2),
+        slider_step("Fingers", fingers, 0.0..=60.0, 1.0),
+        slider("Finger Width", finger_width, 0.0..=0.1),
+        color("Silicon Color", color_cell),
+        color("Backing Color", color_backing),
+        color("Wire Color", color_wire),
+        slider("Cell Variance", cell_variance, 0.0..=0.5),
+        slider("Crystal Mottle", crystal_mottle, 0.0..=1.0),
+        slider("Crystal Scale", crystal_scale, 4.0..=64.0),
+        slider("Glass Gloss", glass_roughness, 0.0..=1.0),
+        nested(weathering_config_editor, weathering, "solar_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`ParquetConfig`] parameters inside a collapsing header.
+    fn parquet_config_editor, ParquetConfig, "Parquet Config" => {
+        u32("Seed", seed),
+        enum_select("Layout:", layout, [
+            ("Herringbone", ParquetLayout::Herringbone),
+            ("Basket", ParquetLayout::Basket),
+            ("Brick", ParquetLayout::Brick)
+        ]),
+        slider("Boards", scale, 2.0..=32.0),
+        slider("Aspect", aspect, 1.0..=12.0),
+        slider("Joint Width", joint_width, 0.0..=0.3),
+        slider("Joint Depth", joint_depth, 0.0..=1.5),
+        slider_step("Grain Lines", grain_lines, 1.0..=32.0, 1.0),
+        slider("Grain Contrast", grain_contrast, 0.0..=1.0),
+        slider("Grain Warp", grain_warp, 0.0..=1.0),
+        slider("Board Variance", board_variance, 0.0..=0.5),
+        color("Wood Color", color_wood),
+        color("Grain Color", color_grain),
+        color("Joint Color", color_joint),
+        slider("Gloss", gloss_roughness, 0.0..=1.0),
+        nested(weathering_config_editor, weathering, "parquet_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
+impl_config_editor!(
+    /// Renders all [`TruchetConfig`] parameters inside a collapsing header.
+    fn truchet_config_editor, TruchetConfig, "Truchet Config" => {
+        u32("Seed", seed),
+        slider("Tiles", scale, 1.0..=32.0),
+        slider("Trace Width", trace_width, 0.01..=0.45),
+        slider("Trace Relief", trace_relief, 0.0..=1.5),
+        slider("Density", density, 0.0..=1.0),
+        color("Panel Color", color_panel),
+        color("Trace Color", color_trace),
+        color("Glow Color", color_glow),
+        slider("Glow", emissive_intensity, 0.0..=4.0),
+        slider("Panel Roughness", panel_roughness, 0.0..=1.0),
+        slider("Trace Roughness", trace_roughness, 0.0..=1.0),
+        slider("Trace Metallic", trace_metallic, 0.0..=1.0),
+        slider("Mottle Scale", mottle_scale, 2.0..=48.0),
+        nested(weathering_config_editor, weathering, "truchet_weather"),
+        slider("Normal Strength", normal_strength, 0.1..=6.0),
+    }
+);
+
 /// Renders the editor for whichever generator `cfg` currently wraps.
 ///
 /// Returns the same `(changed, regen)` pair as the per-config editors.
@@ -1058,6 +1340,15 @@ pub fn texture_config_editor(
         TC::Lava(c) => lava_config_editor(ui, c, id),
         TC::ChainLink(c) => chain_link_config_editor(ui, c, id),
         TC::LogEnd(c) => log_end_config_editor(ui, c, id),
+        TC::CrackedEarth(c) => cracked_earth_config_editor(ui, c, id),
+        TC::Gravel(c) => gravel_config_editor(ui, c, id),
+        TC::ForestFloor(c) => forest_floor_config_editor(ui, c, id),
+        TC::Enamel(c) => enamel_config_editor(ui, c, id),
+        TC::Obsidian(c) => obsidian_config_editor(ui, c, id),
+        TC::Chitin(c) => chitin_config_editor(ui, c, id),
+        TC::SolarPanel(c) => solar_panel_config_editor(ui, c, id),
+        TC::Parquet(c) => parquet_config_editor(ui, c, id),
+        TC::Truchet(c) => truchet_config_editor(ui, c, id),
     }
 }
 
