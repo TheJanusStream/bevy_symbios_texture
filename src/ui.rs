@@ -523,7 +523,7 @@ impl_config_editor!(
         u32("Seed", seed),
         slider_step("Scale (Rows)", scale, 1.0..=16.0, 1.0),
         slider("Row Offset", row_offset, 0.0..=1.0),
-        slider("Aspect Ratio", aspect_ratio, 1.0..=4.0),
+        slider("Aspect Ratio", aspect_ratio, 0.1..=4.0),
         slider("Mortar Size", mortar_size, 0.0..=0.4),
         slider("Bevel", bevel, 0.0..=1.0),
         slider("Color Variance", cell_variance, 0.0..=1.0),
