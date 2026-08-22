@@ -254,7 +254,7 @@ fn setup_scene(
     commands.spawn((
         DirectionalLight {
             illuminance: 3500.0,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         },
         Transform::from_xyz(4.0, 6.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -475,7 +475,7 @@ fn apply_preview_textures(
         .get(handle)
         .map(|m| m.base_color_texture.as_ref() != Some(albedo))
         .unwrap_or(false);
-    if needs_update && let Some(mat) = materials.get_mut(handle) {
+    if needs_update && let Some(mut mat) = materials.get_mut(handle) {
         mat.base_color_texture = Some(albedo.clone());
         mat.normal_map_texture = Some(normal.clone());
         mat.base_color = Color::WHITE;
@@ -497,7 +497,7 @@ fn reset_preview_textures(
         .get(handle)
         .map(|m| m.base_color_texture.is_some())
         .unwrap_or(false);
-    if needs_reset && let Some(mat) = materials.get_mut(handle) {
+    if needs_reset && let Some(mut mat) = materials.get_mut(handle) {
         mat.base_color_texture = None;
         mat.normal_map_texture = None;
         mat.base_color = Color::srgb(0.4, 0.4, 0.4);

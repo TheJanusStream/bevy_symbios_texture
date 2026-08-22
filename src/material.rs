@@ -492,14 +492,14 @@ pub fn patch_procedural_material_textures(
                     cache_ref.insert(key, Arc::new(handles.clone()));
                 }
 
-                if let Some(mat) = materials.get_mut(&patch.target) {
+                if let Some(mut mat) = materials.get_mut(&patch.target) {
                     mat.base_color_texture = Some(handles.albedo);
                     mat.normal_map_texture = Some(handles.normal);
                     mat.metallic_roughness_texture = Some(handles.roughness);
                     // Defaults the emissive factor to white when a glow map
                     // is present (and undoes it when one is not), so the map
                     // is visible without the caller configuring emission.
-                    apply_emissive_map(mat, handles.emissive);
+                    apply_emissive_map(&mut mat, handles.emissive);
                 }
                 commands.entity(entity).despawn();
             }
@@ -658,7 +658,9 @@ mod tests {
     fn uv_scale_is_applied_to_uv_transform() {
         let mut world = asset_world();
         let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
-        let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+        let (mut commands, mut materials, mut images) = state
+            .get_mut(&mut world)
+            .expect("builder params are resolvable on the asset world");
 
         let scaled = MaterialSettings {
             uv_scale: 2.0,
@@ -711,7 +713,9 @@ mod tests {
             world.insert_resource(TextureCache::file(dir.clone(), 0).expect("create cache dir"));
 
             let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
-            let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+            let (mut commands, mut materials, mut images) = state
+                .get_mut(&mut world)
+                .expect("builder params are resolvable on the asset world");
             let handle = build_procedural_material_async(
                 &mut commands,
                 &mut materials,
@@ -752,7 +756,9 @@ mod tests {
             let mut cache = TextureCache::file(dir.clone(), 0).expect("reopen cache dir");
 
             let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
-            let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+            let (mut commands, mut materials, mut images) = state
+                .get_mut(&mut world)
+                .expect("builder params are resolvable on the asset world");
             let handle = build_procedural_material_async(
                 &mut commands,
                 &mut materials,
@@ -842,7 +848,9 @@ mod tests {
 
         let mut world = asset_world();
         let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
-        let (mut commands, mut materials, mut images) = state.get_mut(&mut world);
+        let (mut commands, mut materials, mut images) = state
+            .get_mut(&mut world)
+            .expect("builder params are resolvable on the asset world");
         let handle = build_procedural_material_async(
             &mut commands,
             &mut materials,

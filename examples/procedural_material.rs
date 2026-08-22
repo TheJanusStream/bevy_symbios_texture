@@ -111,7 +111,7 @@ fn drain_manual_task(
     ready: Query<(Entity, &TextureReady, &ManualBrickTask)>,
 ) {
     for (entity, ready, manual) in &ready {
-        if let Some(mat) = materials.get_mut(&manual.0) {
+        if let Some(mut mat) = materials.get_mut(&manual.0) {
             mat.base_color_texture = Some(ready.0.albedo.clone());
             mat.normal_map_texture = Some(ready.0.normal.clone());
             mat.metallic_roughness_texture = Some(ready.0.roughness.clone());

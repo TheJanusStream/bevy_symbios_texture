@@ -13,27 +13,6 @@ flame, flower) and foliage billboards (leaf sprite, grass tuft, frond,
 reed, needle, broadleaf) — bake alpha-silhouette sheets where every atlas
 cell is a per-cell-seeded variant of the same config.
 
-## Bevy compatibility
-
-| bevy_symbios_texture | Bevy |
-|----------------------|------|
-| 0.4 – 0.9            | 0.18 |
-
-## Installation
-
-```toml
-[dependencies]
-bevy_symbios_texture = "0.9"
-```
-
-The optional `egui` feature adds editor widgets for every config type
-(required for the `texture_viewer` example):
-
-```toml
-[dependencies]
-bevy_symbios_texture = { version = "0.9", features = ["egui"] }
-```
-
 ## Quick start
 
 ### Synchronous (blocking)
