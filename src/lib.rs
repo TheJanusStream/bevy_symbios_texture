@@ -108,7 +108,7 @@ pub use generator::{
     map_to_images_card, map_to_images_card_with_usages, map_to_images_with_usages,
 };
 pub use material::{
-    MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig,
+    MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig, apply_emissive_map,
     build_procedural_material_async,
 };
 pub use symbios_texture::leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};

@@ -344,7 +344,17 @@ pub struct PatchMaterialTextures {
 /// brightened glow set via [`MaterialSettings::emission_color`] /
 /// [`emission_strength`](MaterialSettings::emission_strength)) is left
 /// untouched in both directions.
-fn apply_emissive_map(material: &mut StandardMaterial, emissive: Option<Handle<Image>>) {
+///
+/// **Public because a consumer that applies generated textures ITSELF needs
+/// it** (#23). A caller that bakes off the main thread — a Web Worker, say —
+/// receives finished pixels and writes the slots without ever going through
+/// this crate's patch system, and the emissive slot cannot simply be assigned:
+/// the factor has to move with it or the glow does not show. Private, this
+/// left such a caller no option but to copy the body and keep the copy in
+/// step by hand, which is a silent-drift hazard rather than a coupling — a
+/// change here would apply to one of that consumer's two rendering paths and
+/// not the other, with no compile error and no failing test.
+pub fn apply_emissive_map(material: &mut StandardMaterial, emissive: Option<Handle<Image>>) {
     // Compare RGB only: the emissive factor's alpha is not used for emission,
     // and `emission_color × emission_strength` yields `{0,0,0,0}` (alpha 0) at
     // the defaults — distinct from `LinearRgba::BLACK` (alpha 1).  White is
