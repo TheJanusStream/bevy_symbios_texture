@@ -10,22 +10,77 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # Formatting needs no system libraries and no feature resolution, so it runs
+  # as its own fast job rather than repeating once per matrix entry.
+  fmt:
+    name: Formatting
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - name: Install Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt
+          cache: false
+      - run: cargo fmt -- --check
+
+  # `default` is empty, so a single default-features build compiled none of the
+  # optional modules — and those are the ones a consuming app opts into. The
+  # feature set an application actually links was checked nowhere.
+  #
+  # bevy_symbios adopted this shape after its own #34: a `serde_json` dev-dep
+  # that shipped only under `asset-loader` reached main because CI built one
+  # feature set. --all-features alone is not a substitute for the single-feature
+  # entries — a module that compiles only because some *other* feature happens
+  # to be on with it is exactly what this is meant to find.
+  test:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every broken combination in one run instead of stopping at the
+      # first failure.
+      fail-fast: false
+      matrix:
+        include:
+          - name: default (no features)
+            flags: ""
+          - name: egui
+            flags: "--features egui"
+          - name: all features
+            flags: "--all-features"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pinned version out of rust-toolchain.toml — that file is the
+      # single source of truth, and this action honours it, which
+      # `dtolnay/rust-toolchain@stable` does not: it installs whatever is
+      # newest and ignores the pin.
+      #
+      # `cache: false` because the Swatinem step already caches; two cache
+      # layers on one key fight each other.
+      - name: Install Rust Toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+          cache: false
 
       - name: Install Wayland dependencies
         run: sudo apt-get update && sudo apt-get install -y libwayland-dev pkg-config libasound2-dev libudev-dev
+      # Bevy is expensive to build from scratch; without this each matrix entry
+      # pays the full compile cost.
+      - name: Cache cargo registry and target dir
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
 
-      - name: Check Formatting
-        run: cargo fmt -- --check
-
+      # `--all-targets` covers tests, examples and benches — the lib-only lint
+      # this replaces missed warnings in the test suite entirely.
       - name: Clippy (Linting)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy ${{ matrix.flags }} --all-targets -- -D warnings
 
       - name: Build
-        run: cargo build --verbose
+        run: cargo build --verbose ${{ matrix.flags }}
 
       - name: Run Tests
-        run: cargo test --verbose
+        run: cargo test --verbose ${{ matrix.flags }}
+
