@@ -32,7 +32,7 @@ use bevy::render::render_resource::Face;
 
 use crate::async_gen::PendingTexture;
 use crate::cache::{TextureCache, TextureCacheKey};
-use crate::generator::{map_to_images, map_to_images_card};
+use crate::generator::{GeneratedHandles, TextureMap, map_to_images, map_to_images_card};
 
 /// PBR rendering hints derived from a [`TextureConfig`] variant.
 ///
@@ -308,6 +308,64 @@ impl Default for MaterialSettings {
     }
 }
 
+impl MaterialSettings {
+    /// Build the [`StandardMaterial`] these settings describe, with the four
+    /// texture slots left empty.
+    ///
+    /// This is the pure half of [`build_procedural_material_async`] — the same
+    /// field-for-field construction, without the `&mut Commands` that builder
+    /// needs in order to dispatch generation.  A consumer whose textures are
+    /// baked somewhere this crate's rayon pool cannot reach (a Web Worker, a
+    /// job queue, another process) forks the *dispatch* by calling this and
+    /// driving its own baking, and still gets the *appearance* from the one
+    /// body the built-in path uses.
+    ///
+    /// Slots are filled in afterwards, either by
+    /// [`patch_procedural_material_textures`] or, for such a consumer, by
+    /// [`apply_generated_handles`].
+    ///
+    /// `uv_transform` is set to a uniform scale of [`uv_scale`]; a caller with
+    /// its own UV offset/rotation convention overwrites the field after the
+    /// call rather than reimplementing the rest.
+    ///
+    /// [`uv_scale`]: MaterialSettings::uv_scale
+    pub fn standard_material(&self) -> StandardMaterial {
+        let props = self.texture.render_properties();
+        let emissive =
+            Color::srgb_from_array(self.emission_color).to_linear() * self.emission_strength;
+
+        StandardMaterial {
+            base_color: Color::srgb_from_array(self.base_color),
+            perceptual_roughness: self.roughness,
+            metallic: self.metallic,
+            emissive,
+            alpha_mode: props.alpha_mode,
+            double_sided: props.double_sided,
+            cull_mode: props.cull_mode,
+            uv_transform: Affine2::from_scale(Vec2::splat(self.uv_scale)),
+            ..Default::default()
+        }
+    }
+
+    /// The [`TextureCacheKey`] a bake of these settings at `width` x `height`
+    /// should be stored under, or `None` when [`TextureConfig::None`] means
+    /// there is nothing to bake.
+    ///
+    /// The key fingerprints the *config*, not the material, so two materials
+    /// differing only in base colour share one baked texture set.
+    pub fn cache_key(&self, width: u32, height: u32) -> Option<TextureCacheKey> {
+        if matches!(self.texture, TextureConfig::None) {
+            return None;
+        }
+        Some(TextureCacheKey {
+            kind: self.texture.label(),
+            fingerprint: self.texture.fingerprint(),
+            width,
+            height,
+        })
+    }
+}
+
 /// Marker for an in-flight procedural-texture task whose result should be
 /// patched directly onto a [`StandardMaterial`].
 ///
@@ -370,6 +428,65 @@ pub fn apply_emissive_map(material: &mut StandardMaterial, emissive: Option<Hand
     material.emissive_texture = emissive;
 }
 
+/// Write a finished [`GeneratedHandles`] set into `material`'s texture slots.
+///
+/// The three always-present slots are assigned directly; the emissive slot
+/// goes through [`apply_emissive_map`], which also moves the emissive *factor*
+/// so a generated glow map is actually visible.
+///
+/// Public for the same reason [`apply_emissive_map`] is: a consumer that bakes
+/// off this crate's own pool receives finished pixels and writes the slots
+/// itself, and "assign three handles, then call `apply_emissive_map`" is
+/// exactly the kind of four-line convention that drifts silently once it is
+/// copied rather than called.
+pub fn apply_generated_handles(material: &mut StandardMaterial, handles: &GeneratedHandles) {
+    material.base_color_texture = Some(handles.albedo.clone());
+    material.normal_map_texture = Some(handles.normal.clone());
+    material.metallic_roughness_texture = Some(handles.roughness.clone());
+    apply_emissive_map(material, handles.emissive.clone());
+}
+
+/// Persist, upload and cache a finished [`TextureMap`], returning the handles.
+///
+/// The callable core of [`patch_procedural_material_textures`]: raw pixels are
+/// handed to a disk-backed store *before* the upload (which consumes `map`),
+/// the map is uploaded with the sampler mode `is_card` selects, and the
+/// resulting handles are written into the cache under `key`.
+///
+/// The system applies the returned handles to one material; a consumer with
+/// several materials awaiting the same bake, or with no `PendingTexture`
+/// entity at all because it baked elsewhere, calls this and then
+/// [`apply_generated_handles`] per target.  Split out so that ordering — and
+/// the fact that `persist_pixels` must precede the upload — lives in one
+/// place.
+///
+/// Pass `key: None` to skip caching entirely.
+pub fn store_generated_texture_map(
+    map: TextureMap,
+    is_card: bool,
+    key: Option<&TextureCacheKey>,
+    cache: Option<&mut TextureCache>,
+    images: &mut Assets<Image>,
+) -> GeneratedHandles {
+    // Persist raw pixels for disk-backed stores while the map is still
+    // available — the upload below consumes it.
+    if let (Some(cache_ref), Some(key)) = (cache.as_deref(), key) {
+        cache_ref.persist_pixels(key, &map, is_card);
+    }
+
+    let handles = if is_card {
+        map_to_images_card(map, images)
+    } else {
+        map_to_images(map, images)
+    };
+
+    if let (Some(cache_ref), Some(key)) = (cache, key) {
+        cache_ref.insert(key.clone(), Arc::new(handles.clone()));
+    }
+
+    handles
+}
+
 /// One-shot helper: build a [`StandardMaterial`] from `settings`, dispatch
 /// any required texture generation in the background, and return the handle
 /// immediately.
@@ -395,32 +512,8 @@ pub fn build_procedural_material_async(
     width: u32,
     height: u32,
 ) -> Handle<StandardMaterial> {
-    let props = settings.texture.render_properties();
-    let emissive =
-        Color::srgb_from_array(settings.emission_color).to_linear() * settings.emission_strength;
-
-    let mut material = StandardMaterial {
-        base_color: Color::srgb_from_array(settings.base_color),
-        perceptual_roughness: settings.roughness,
-        metallic: settings.metallic,
-        emissive,
-        alpha_mode: props.alpha_mode,
-        double_sided: props.double_sided,
-        cull_mode: props.cull_mode,
-        uv_transform: Affine2::from_scale(Vec2::splat(settings.uv_scale)),
-        ..Default::default()
-    };
-
-    let cache_key = if matches!(settings.texture, TextureConfig::None) {
-        None
-    } else {
-        Some(TextureCacheKey {
-            kind: settings.texture.label(),
-            fingerprint: settings.texture.fingerprint(),
-            width,
-            height,
-        })
-    };
+    let mut material = settings.standard_material();
+    let cache_key = settings.cache_key(width, height);
 
     // Cache hit: write handles into the material before we hand it to Bevy.
     // Full lookup — disk-backed stores read their blob and upload it into
@@ -429,10 +522,7 @@ pub fn build_procedural_material_async(
     if let (Some(key), Some(cache_ref)) = (cache_key.as_ref(), cache.as_deref())
         && let Some(handles) = cache_ref.get(key, images)
     {
-        material.base_color_texture = Some(handles.albedo.clone());
-        material.normal_map_texture = Some(handles.normal.clone());
-        material.metallic_roughness_texture = Some(handles.roughness.clone());
-        apply_emissive_map(&mut material, handles.emissive.clone());
+        apply_generated_handles(&mut material, &handles);
         return materials.add(material);
     }
 
@@ -480,36 +570,19 @@ pub fn patch_procedural_material_textures(
 
         match poll {
             Ok(Ok(map)) => {
-                let is_card = pending.is_card();
-
-                // Persist raw pixels for disk-backed stores while the map is
-                // still available — the upload below consumes it.
-                if let Some(cache_ref) = cache.as_deref()
-                    && let Some(key) = patch.cache_key.as_ref()
-                {
-                    cache_ref.persist_pixels(key, &map, is_card);
-                }
-
-                let handles = if is_card {
-                    map_to_images_card(map, &mut images)
-                } else {
-                    map_to_images(map, &mut images)
-                };
-
-                if let Some(cache_ref) = cache.as_deref_mut()
-                    && let Some(key) = patch.cache_key.clone()
-                {
-                    cache_ref.insert(key, Arc::new(handles.clone()));
-                }
+                let handles = store_generated_texture_map(
+                    map,
+                    pending.is_card(),
+                    patch.cache_key.as_ref(),
+                    cache.as_deref_mut(),
+                    &mut images,
+                );
 
                 if let Some(mut mat) = materials.get_mut(&patch.target) {
-                    mat.base_color_texture = Some(handles.albedo);
-                    mat.normal_map_texture = Some(handles.normal);
-                    mat.metallic_roughness_texture = Some(handles.roughness);
-                    // Defaults the emissive factor to white when a glow map
-                    // is present (and undoes it when one is not), so the map
-                    // is visible without the caller configuring emission.
-                    apply_emissive_map(&mut mat, handles.emissive);
+                    // Also defaults the emissive factor to white when a glow
+                    // map is present (and undoes it when one is not), so the
+                    // map is visible without the caller configuring emission.
+                    apply_generated_handles(&mut mat, &handles);
                 }
                 commands.entity(entity).despawn();
             }
@@ -800,6 +873,288 @@ mod tests {
 
     fn dummy_image_handle() -> Handle<Image> {
         Handle::<Image>::default()
+    }
+
+    // -----------------------------------------------------------------
+    // The pure halves of the async builder (#102): a consumer that has to
+    // fork *dispatch* — a wasm build baking in a Web Worker, say — must be
+    // able to reach the *appearance* without reimplementing it.  These
+    // tests pin the contract that consumer relies on.
+    // -----------------------------------------------------------------
+
+    /// `standard_material` carries every field the async builder used to
+    /// build inline, and leaves the texture slots for the caller to fill.
+    #[test]
+    fn standard_material_carries_every_appearance_field() {
+        let settings = MaterialSettings {
+            base_color: [0.2, 0.6, 0.9],
+            emission_color: [0.9, 0.3, 0.1],
+            emission_strength: 2.5,
+            roughness: 0.35,
+            metallic: 0.8,
+            uv_scale: 3.0,
+            texture: TextureConfig::None,
+        };
+        let mat = settings.standard_material();
+
+        assert_eq!(mat.base_color, Color::srgb_from_array([0.2, 0.6, 0.9]));
+        assert_eq!(mat.perceptual_roughness, 0.35);
+        assert_eq!(mat.metallic, 0.8);
+        assert_eq!(
+            mat.emissive,
+            Color::srgb_from_array([0.9, 0.3, 0.1]).to_linear() * 2.5,
+            "emissive is the emission colour scaled by strength"
+        );
+        assert_eq!(mat.uv_transform, Affine2::from_scale(Vec2::splat(3.0)));
+        assert!(
+            mat.base_color_texture.is_none()
+                && mat.normal_map_texture.is_none()
+                && mat.metallic_roughness_texture.is_none()
+                && mat.emissive_texture.is_none(),
+            "slots are filled later, by the patch system or the caller"
+        );
+    }
+
+    /// The render properties a config carries (alpha mode, culling) reach the
+    /// material through `standard_material`, so a card built this way is a
+    /// card.
+    #[test]
+    fn standard_material_takes_render_properties_from_the_config() {
+        use crate::bark::BarkConfig;
+        use crate::leaf::LeafConfig;
+
+        let surface = MaterialSettings {
+            texture: TextureConfig::Bark(BarkConfig::default()),
+            ..MaterialSettings::default()
+        }
+        .standard_material();
+        let card = MaterialSettings {
+            texture: TextureConfig::Leaf(LeafConfig::default()),
+            ..MaterialSettings::default()
+        }
+        .standard_material();
+
+        let surface_props = TextureConfig::Bark(BarkConfig::default()).render_properties();
+        let card_props = TextureConfig::Leaf(LeafConfig::default()).render_properties();
+
+        assert_eq!(surface.alpha_mode, surface_props.alpha_mode);
+        assert_eq!(surface.double_sided, surface_props.double_sided);
+        assert_eq!(surface.cull_mode, surface_props.cull_mode);
+        assert_eq!(card.alpha_mode, card_props.alpha_mode);
+        assert_eq!(card.double_sided, card_props.double_sided);
+        assert_eq!(card.cull_mode, card_props.cull_mode);
+        assert_ne!(
+            surface.alpha_mode, card.alpha_mode,
+            "precondition: the two shapes actually differ"
+        );
+    }
+
+    /// The builder and the pure half must not drift: what
+    /// `build_procedural_material_async` adds to `Assets` is exactly what
+    /// `standard_material` returns, and its key is `cache_key`'s.
+    #[test]
+    fn async_builder_and_pure_half_agree() {
+        use crate::bark::BarkConfig;
+        use bevy::ecs::system::SystemState;
+        use bevy::ecs::world::World;
+
+        let settings = MaterialSettings {
+            base_color: [0.1, 0.2, 0.3],
+            emission_color: [0.4, 0.5, 0.6],
+            emission_strength: 1.5,
+            roughness: 0.25,
+            metallic: 0.75,
+            uv_scale: 4.0,
+            texture: TextureConfig::Bark(BarkConfig::default()),
+        };
+
+        let mut world = World::new();
+        world.init_resource::<Assets<StandardMaterial>>();
+        world.init_resource::<Assets<Image>>();
+        /// The parameter set `build_procedural_material_async` needs, named
+        /// so the `SystemState` below stays inside `clippy::type_complexity`.
+        type BuilderParams<'w, 's> = (
+            Commands<'w, 's>,
+            ResMut<'w, Assets<StandardMaterial>>,
+            ResMut<'w, Assets<Image>>,
+        );
+
+        let mut state: SystemState<BuilderParams> = SystemState::new(&mut world);
+        let (mut commands, mut materials, mut images) = state
+            .get_mut(&mut world)
+            .expect("asset world resolves the builder params");
+        let handle = build_procedural_material_async(
+            &mut commands,
+            &mut materials,
+            &mut images,
+            None,
+            &settings,
+            64,
+            32,
+        );
+        state.apply(&mut world);
+
+        let materials = world.resource::<Assets<StandardMaterial>>();
+        let built = materials.get(&handle).expect("added synchronously");
+        let pure = settings.standard_material();
+
+        assert_eq!(built.base_color, pure.base_color);
+        assert_eq!(built.perceptual_roughness, pure.perceptual_roughness);
+        assert_eq!(built.metallic, pure.metallic);
+        assert_eq!(built.emissive, pure.emissive);
+        assert_eq!(built.alpha_mode, pure.alpha_mode);
+        assert_eq!(built.double_sided, pure.double_sided);
+        assert_eq!(built.cull_mode, pure.cull_mode);
+        assert_eq!(built.uv_transform, pure.uv_transform);
+
+        // …and the dispatched task carries the key `cache_key` names.
+        let mut patches = world.query::<&PatchMaterialTextures>();
+        let patch = patches.iter(&world).next().expect("bark dispatches a bake");
+        assert_eq!(patch.cache_key, settings.cache_key(64, 32));
+    }
+
+    /// `cache_key` fingerprints the config at the requested dimensions, and
+    /// declines to key a material that has nothing to bake.
+    #[test]
+    fn cache_key_fingerprints_the_config_and_skips_none() {
+        use crate::bark::BarkConfig;
+
+        let bark = MaterialSettings {
+            texture: TextureConfig::Bark(BarkConfig::default()),
+            ..MaterialSettings::default()
+        };
+        let key = bark
+            .cache_key(256, 128)
+            .expect("a bakeable config is keyed");
+        assert_eq!(key.kind, bark.texture.label());
+        assert_eq!(key.fingerprint, bark.texture.fingerprint());
+        assert_eq!((key.width, key.height), (256, 128));
+
+        assert!(
+            MaterialSettings::default().cache_key(256, 128).is_none(),
+            "TextureConfig::None has nothing to bake, so nothing to key"
+        );
+
+        // Base colour is not part of the identity: two materials differing
+        // only in appearance share one baked texture set.
+        let tinted = MaterialSettings {
+            base_color: [1.0, 0.0, 0.0],
+            ..bark.clone()
+        };
+        assert_eq!(tinted.cache_key(256, 128), bark.cache_key(256, 128));
+    }
+
+    /// `apply_generated_handles` writes all four slots, and the emissive
+    /// factor moves with the glow map (the half a copy of the three plain
+    /// assignments would silently omit).
+    #[test]
+    fn apply_generated_handles_writes_every_slot_and_moves_the_factor() {
+        let handles = GeneratedHandles {
+            albedo: dummy_image_handle(),
+            normal: dummy_image_handle(),
+            roughness: dummy_image_handle(),
+            emissive: Some(dummy_image_handle()),
+        };
+        let mut mat = StandardMaterial::default();
+        assert_eq!(mat.emissive, LinearRgba::BLACK, "precondition");
+
+        apply_generated_handles(&mut mat, &handles);
+
+        assert!(mat.base_color_texture.is_some());
+        assert!(mat.normal_map_texture.is_some());
+        assert!(mat.metallic_roughness_texture.is_some());
+        assert!(mat.emissive_texture.is_some());
+        assert_eq!(
+            mat.emissive,
+            LinearRgba::WHITE,
+            "the glow map is invisible unless the factor moves with it"
+        );
+
+        // No glow map: the three plain slots still land, and the auto-white
+        // is undone rather than left emitting.
+        let dark = GeneratedHandles {
+            emissive: None,
+            ..handles
+        };
+        apply_generated_handles(&mut mat, &dark);
+        assert!(mat.emissive_texture.is_none());
+        assert_eq!(mat.emissive, LinearRgba::BLACK);
+    }
+
+    fn flat_map(width: u32, height: u32, emissive: bool) -> TextureMap {
+        let px = (width * height * 4) as usize;
+        TextureMap {
+            albedo: vec![200; px],
+            normal: vec![128; px],
+            roughness: vec![64; px],
+            emissive: emissive.then(|| vec![255; px]),
+            width,
+            height,
+            mip_level_count: 1,
+        }
+    }
+
+    /// `store_generated_texture_map` uploads the map, and — when a key and a
+    /// cache are supplied — leaves the result retrievable, so a consumer
+    /// baking outside this crate shares the cache with the built-in path.
+    #[test]
+    fn store_generated_texture_map_uploads_and_caches() {
+        let mut images = Assets::<Image>::default();
+        let mut cache = TextureCache::memory(8);
+        let key = TextureCacheKey {
+            kind: "test",
+            fingerprint: 42,
+            width: 4,
+            height: 4,
+        };
+
+        let handles = store_generated_texture_map(
+            flat_map(4, 4, true),
+            false,
+            Some(&key),
+            Some(&mut cache),
+            &mut images,
+        );
+        assert!(images.get(&handles.albedo).is_some());
+        assert!(images.get(&handles.normal).is_some());
+        assert!(images.get(&handles.roughness).is_some());
+        assert!(
+            handles.emissive.is_some(),
+            "the glow map survives the upload"
+        );
+
+        let hit = cache.get(&key, &mut images).expect("the bake is cached");
+        assert_eq!(hit.albedo, handles.albedo);
+        assert_eq!(hit.emissive, handles.emissive);
+    }
+
+    /// A `None` key opts out of caching entirely without changing the upload.
+    #[test]
+    fn store_generated_texture_map_without_a_key_skips_the_cache() {
+        let mut images = Assets::<Image>::default();
+        let mut cache = TextureCache::memory(8);
+
+        let would_have_been = TextureCacheKey {
+            kind: "test",
+            fingerprint: 7,
+            width: 4,
+            height: 4,
+        };
+
+        let handles = store_generated_texture_map(
+            flat_map(4, 4, false),
+            true,
+            None,
+            Some(&mut cache),
+            &mut images,
+        );
+
+        assert!(images.get(&handles.albedo).is_some());
+        assert!(handles.emissive.is_none());
+        assert!(
+            cache.get(&would_have_been, &mut images).is_none(),
+            "an unkeyed bake must not enter the cache under any key"
+        );
     }
 
     #[test]

@@ -133,6 +133,28 @@ fn spawn_brick_wall(
 }
 ```
 
+#### Baking somewhere else
+
+The helper fuses *construction* with *dispatch* — it needs `&mut Commands`
+because it spawns the generation task. A consumer whose textures are baked
+somewhere this crate's rayon pool cannot reach (a Web Worker, a job queue,
+another process) has to fork the dispatch, and the four pieces it needs are
+public so it does not also have to fork the appearance:
+
+| Item | Does |
+|------|------|
+| `MaterialSettings::standard_material()` | Builds the `StandardMaterial` these settings describe, texture slots empty |
+| `MaterialSettings::cache_key(w, h)` | The `TextureCacheKey` a bake of them belongs under; `None` for `TextureConfig::None` |
+| `store_generated_texture_map(map, is_card, key, cache, images)` | Persists raw pixels, uploads the map, writes the cache; returns the handles |
+| `apply_generated_handles(&mut material, &handles)` | Writes all four slots, moving the emissive *factor* with the glow map |
+
+`build_procedural_material_async` and `patch_procedural_material_textures` are
+written in terms of these, so a consumer driving them by hand is running the
+same bodies rather than a copy that drifts.
+
+`uv_transform` is set to a uniform scale of `uv_scale`; a caller with its own UV
+offset/rotation convention overwrites that one field after the call.
+
 ### Texture cache
 
 To avoid regenerating the same `(generator, config, size)` tuple across

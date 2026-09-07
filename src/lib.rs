@@ -109,7 +109,8 @@ pub use generator::{
 };
 pub use material::{
     MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig, apply_emissive_map,
-    build_procedural_material_async,
+    apply_generated_handles, build_procedural_material_async, patch_procedural_material_textures,
+    store_generated_texture_map,
 };
 pub use symbios_texture::leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
 pub use symbios_texture::noise::ToroidalNoise;
