@@ -347,8 +347,16 @@ const GOLDEN_ASHLAR_DEFAULT: u64 = 0x05fa_5166_f4bd_cf6c;
 const GOLDEN_ASHLAR_VARIED: u64 = 0xb70c_f3b9_bf55_c6bf;
 const GOLDEN_COBBLESTONE_DEFAULT: u64 = 0x6666_008f_1d37_58e5;
 const GOLDEN_COBBLESTONE_VARIED: u64 = 0xede8_e451_cbc8_2c5c;
-const GOLDEN_BRICK_DEFAULT: u64 = 0x1975_181d_137c_9798;
-const GOLDEN_BRICK_VARIED: u64 = 0x04dd_2e4f_0977_76fd;
+// Re-blessed for `symbios-texture` 0.4.3, which wrapped the brick column
+// index so a brick straddling the U seam is one colour rather than two. Its
+// changelog called the move out and said downstream goldens needed
+// re-capturing; this pair was missed, so these two cases had been failing
+// since 0.4.3 published — on the untouched tree, at 0.4.4, before any of the
+// 0.11 work. Both configs stagger their courses (`BrickConfig::default` has a
+// non-zero `row_offset`, and the varied case sets 0.333), which is exactly the
+// case the fix moves.
+const GOLDEN_BRICK_DEFAULT: u64 = 0x92ec_9e8c_cc1f_1a4e;
+const GOLDEN_BRICK_VARIED: u64 = 0x34d9_3525_c6c2_96a5;
 // Bark and marble were re-captured after the intentional visual change in
 // 0.6.0: warp layers now run `warp_octaves` (default 3) instead of the full
 // base `octaves` count (accepted drift, issue #78).

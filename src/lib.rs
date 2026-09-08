@@ -76,6 +76,11 @@
 //! [`TextureCache`]: cache::TextureCache
 //! [`TextureConfig`]: material::TextureConfig
 
+// docs.rs builds with `--cfg docsrs` on nightly, which is what puts the
+// "available on crate feature `egui`" badge on the gated items. Inert
+// everywhere else.
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+
 // Re-export the entire Bevy-free core so the public module paths
 // (`bevy_symbios_texture::ashlar`, `::sprite`, `::genetics`, …) and every
 // pure `Config`/`Generator`/helper type are preserved exactly.  The wrapper's

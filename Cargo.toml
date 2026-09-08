@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.10.3"
+version = "0.11.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."
@@ -10,12 +10,20 @@ repository = "https://github.com/TheJanusStream/bevy_symbios_texture"
 keywords = ["texture", "procedural", "generative", "simulation"]
 categories = ["simulation", "game-development", "mathematics"]
 
+# docs.rs builds every feature, so the egui config editors — the largest
+# gated surface here, and the one an application embeds — are documented
+# whether or not a default build carries them (symbios-overlands #1172,
+# finding 10).
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+
 [features]
 default = []
 egui = ["dep:bevy_egui"]
 
 [dependencies]
-symbios-texture = "0.4"
+symbios-texture = "0.5"
 bevy = "0.19"
 bevy_egui = { version = "0.41", optional = true }
 noise = "0.9"
@@ -42,6 +50,10 @@ name = "animated_rust"
 [[bench]]
 name = "bench_main"
 harness = false
+
+[lints.rust]
+# Set by docs.rs only; see the attribute at the top of `src/lib.rs`.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
 
 [profile.bench]
 debug = true
