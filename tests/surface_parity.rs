@@ -12,21 +12,25 @@ use bevy_symbios_texture::ashlar::{AshlarConfig, AshlarGenerator};
 use bevy_symbios_texture::asphalt::{AsphaltConfig, AsphaltGenerator};
 use bevy_symbios_texture::bark::{BarkConfig, BarkGenerator};
 use bevy_symbios_texture::brick::{BrickConfig, BrickGenerator};
+use bevy_symbios_texture::chain_link::{ChainLinkConfig, ChainLinkGenerator};
 use bevy_symbios_texture::cobblestone::{CobblestoneConfig, CobblestoneGenerator};
 use bevy_symbios_texture::concrete::{ConcreteConfig, ConcreteGenerator};
 use bevy_symbios_texture::corrugated::{CorrugatedConfig, CorrugatedGenerator};
 use bevy_symbios_texture::encaustic::{EncausticConfig, EncausticGenerator, EncausticPattern};
 use bevy_symbios_texture::generator::{TextureGenerator, TextureMap};
 use bevy_symbios_texture::ground::{GroundConfig, GroundGenerator};
+use bevy_symbios_texture::iron_grille::{IronGrilleConfig, IronGrilleGenerator};
 use bevy_symbios_texture::marble::{MarbleConfig, MarbleGenerator};
 use bevy_symbios_texture::metal::{MetalConfig, MetalGenerator, MetalStyle};
 use bevy_symbios_texture::pavers::{PaversConfig, PaversGenerator, PaversLayout};
 use bevy_symbios_texture::plank::{PlankConfig, PlankGenerator};
 use bevy_symbios_texture::rock::{RockConfig, RockGenerator};
 use bevy_symbios_texture::shingle::{ShingleConfig, ShingleGenerator};
+use bevy_symbios_texture::stained_glass::{StainedGlassConfig, StainedGlassGenerator};
 use bevy_symbios_texture::stucco::{StuccoConfig, StuccoGenerator};
 use bevy_symbios_texture::thatch::{ThatchConfig, ThatchGenerator};
 use bevy_symbios_texture::wainscoting::{WainscotingConfig, WainscotingGenerator};
+use bevy_symbios_texture::window::{WindowConfig, WindowGenerator};
 
 /// FNV-1a over all three pixel buffers — dependency-free and stable across
 /// platforms and Rust versions (unlike `DefaultHasher`).
@@ -315,6 +319,73 @@ parity_case!(
     GOLDEN_PLANK_VARIED
 );
 
+// The four alpha-card generators `symbios-texture` 0.7.0 moved onto the shared
+// surface driver (its #19).  Their baselines were captured on 0.6.0, before the
+// port, and the port left every one of the eight unmoved — so these rows pin the
+// port, not a re-capture of it.  `hash_of` covers albedo, normal and roughness;
+// the alpha channel a card also writes is not in the hash.
+parity_case!(
+    chain_link_output_is_byte_stable,
+    ChainLinkGenerator,
+    ChainLinkConfig::default(),
+    ChainLinkConfig {
+        seed: 5,
+        cell_count: 12.0,
+        wire_radius: 0.1,
+        rust_level: 0.6,
+        ..ChainLinkConfig::default()
+    },
+    GOLDEN_CHAIN_LINK_DEFAULT,
+    GOLDEN_CHAIN_LINK_VARIED
+);
+
+parity_case!(
+    iron_grille_output_is_byte_stable,
+    IronGrilleGenerator,
+    IronGrilleConfig::default(),
+    IronGrilleConfig {
+        seed: 9,
+        bars_x: 6,
+        bars_y: 3,
+        round_bars: false,
+        rust_level: 0.7,
+        ..IronGrilleConfig::default()
+    },
+    GOLDEN_IRON_GRILLE_DEFAULT,
+    GOLDEN_IRON_GRILLE_VARIED
+);
+
+parity_case!(
+    stained_glass_output_is_byte_stable,
+    StainedGlassGenerator,
+    StainedGlassConfig::default(),
+    StainedGlassConfig {
+        seed: 4,
+        cell_count: 20,
+        lead_width: 0.08,
+        grime_level: 0.3,
+        ..StainedGlassConfig::default()
+    },
+    GOLDEN_STAINED_GLASS_DEFAULT,
+    GOLDEN_STAINED_GLASS_VARIED
+);
+
+parity_case!(
+    window_output_is_byte_stable,
+    WindowGenerator,
+    WindowConfig::default(),
+    WindowConfig {
+        seed: 7,
+        panes_x: 3,
+        panes_y: 2,
+        glass_opacity: 0.55,
+        grime_level: 0.4,
+        ..WindowConfig::default()
+    },
+    GOLDEN_WINDOW_DEFAULT,
+    GOLDEN_WINDOW_VARIED
+);
+
 // Captured from the pre-port implementations (this commit, 64×64).
 const GOLDEN_ROCK_DEFAULT: u64 = 0x5305_c95c_840b_981f;
 const GOLDEN_ROCK_VARIED: u64 = 0x7df4_7bb0_3f32_dad0;
@@ -342,7 +413,14 @@ const GOLDEN_WAINSCOTING_VARIED: u64 = 0xce1c_1f7b_58a0_e510;
 const GOLDEN_ENCAUSTIC_DEFAULT: u64 = 0x0d09_564f_4dfd_0155;
 const GOLDEN_ENCAUSTIC_VARIED: u64 = 0x03ae_8793_a709_1791;
 const GOLDEN_PAVERS_DEFAULT: u64 = 0xa63b_6090_7b5e_f446;
-const GOLDEN_PAVERS_VARIED: u64 = 0x9a03_b216_1fee_cfd4;
+// Re-blessed for `symbios-texture` 0.7.0.  The varied case is the only
+// `Hexagonal` row here, and 0.6.0 fixed two things about that layout: the U
+// seam did not tile (its #13 — a flat-top lattice needs an even column count)
+// and `hex_sdf`'s `r` is the apothem, not the circumradius, so `hex_cell` drew
+// a hexagon that strictly contained its own Voronoi cell and no pixel was ever
+// grout (its #17).  `PaversLayout::Square` is untouched, hence the default
+// holding.
+const GOLDEN_PAVERS_VARIED: u64 = 0x0101_c664_d376_0696;
 const GOLDEN_ASHLAR_DEFAULT: u64 = 0x05fa_5166_f4bd_cf6c;
 const GOLDEN_ASHLAR_VARIED: u64 = 0xb70c_f3b9_bf55_c6bf;
 const GOLDEN_COBBLESTONE_DEFAULT: u64 = 0x6666_008f_1d37_58e5;
@@ -356,11 +434,31 @@ const GOLDEN_COBBLESTONE_VARIED: u64 = 0xede8_e451_cbc8_2c5c;
 // non-zero `row_offset`, and the varied case sets 0.333), which is exactly the
 // case the fix moves.
 const GOLDEN_BRICK_DEFAULT: u64 = 0x92ec_9e8c_cc1f_1a4e;
-const GOLDEN_BRICK_VARIED: u64 = 0x34d9_3525_c6c2_96a5;
+// Re-blessed again for `symbios-texture` 0.7.0: `BrickGenerator::new` now snaps
+// `row_offset` to a whole fraction of the scale exactly as the genotype fixup
+// already did (its #14), so the varied case's 0.333 at scale 4 becomes 0.25.
+// The default's `row_offset` is already snapped, which is why it holds.
+const GOLDEN_BRICK_VARIED: u64 = 0x5dd4_30c4_7b79_4145;
 // Bark and marble were re-captured after the intentional visual change in
 // 0.6.0: warp layers now run `warp_octaves` (default 3) instead of the full
 // base `octaves` count (accepted drift, issue #78).
 const GOLDEN_BARK_DEFAULT: u64 = 0x8433_25c5_18fe_7eb3;
 const GOLDEN_BARK_VARIED: u64 = 0x8e3c_0a26_cc91_3674;
-const GOLDEN_PLANK_DEFAULT: u64 = 0x07fe_04ba_940c_ae21;
-const GOLDEN_PLANK_VARIED: u64 = 0x94e1_59e5_9544_8098;
+// Re-blessed for `symbios-texture` 0.7.0.  0.6.0 moved plank onto the
+// `SurfaceCell` driver byte-for-byte by preserving the old loop's truncated
+// joint byte (`(0.92 * 255.0) as u8` = 234, where `surface::pack_texel`
+// rounds); 0.7.0 harmonised it to the rounded 235 (its #18), which moves both
+// rows and nothing else.
+const GOLDEN_PLANK_DEFAULT: u64 = 0x317f_2908_1aba_2cc1;
+const GOLDEN_PLANK_VARIED: u64 = 0x8b18_3859_5ed1_ff38;
+
+// Captured on `symbios-texture` 0.6.0 for the four alpha-card generators, and
+// unmoved by the 0.7.0 port that put them on the shared surface driver.
+const GOLDEN_CHAIN_LINK_DEFAULT: u64 = 0xcf38_9fce_4b5f_f9ad;
+const GOLDEN_CHAIN_LINK_VARIED: u64 = 0x6450_202a_9380_34c4;
+const GOLDEN_IRON_GRILLE_DEFAULT: u64 = 0x13ae_3556_6bcd_8e76;
+const GOLDEN_IRON_GRILLE_VARIED: u64 = 0x108f_6a8e_b810_dd81;
+const GOLDEN_STAINED_GLASS_DEFAULT: u64 = 0xe82d_df95_1c46_e6fa;
+const GOLDEN_STAINED_GLASS_VARIED: u64 = 0xdf93_dfd1_7b18_9623;
+const GOLDEN_WINDOW_DEFAULT: u64 = 0x0cdb_aaa8_9459_b670;
+const GOLDEN_WINDOW_VARIED: u64 = 0xbb27_9539_7751_c6ba;

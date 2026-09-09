@@ -36,6 +36,11 @@
 //! card.  Shared conventions live in [`sprite`]; upload with
 //! [`map_to_images_card`].
 //!
+//! **Shared operators** — [`weathering`] ages any built or dressed surface
+//! after generation (every such config carries a `weathering` block), and
+//! [`hex_blend`](mod@hex_blend) rebuilds a finished tile as a de-repeated one at bake time.
+//! Both come from the core and are re-exported here unchanged.
+//!
 //! # Architecture
 //! Every generator implements [`TextureGenerator`], which produces a
 //! [`TextureMap`] (raw pixel buffers for albedo, normal, roughness/ORM, and

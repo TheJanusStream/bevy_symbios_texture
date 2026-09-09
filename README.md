@@ -367,6 +367,7 @@ let config = PlankConfig {
     grain_warp: 0.35,     // domain-warp strength that bends grain lines [0, 1]
     color_wood_light: [0.72, 0.52, 0.30],
     color_wood_dark:  [0.42, 0.26, 0.12],
+    weathering: Default::default(),  // see "Weathering (shared)" below
     normal_strength: 2.5,
 };
 ```
@@ -1067,17 +1068,23 @@ let config = TruchetConfig {
 
 Every generator depicting a **built or dressed** surface carries an optional
 `weathering` block that ages it after generation: ashlar, asphalt, brick,
-chitin, cobblestone, concrete, corrugated, enamel, encaustic, fabric, marble,
-metal, obsidian, parquet, pavers, rock, shingle, solar panel, stucco, thatch,
-truchet and wainscoting.
+chain link, chitin, cobblestone, concrete, corrugated, enamel, encaustic,
+fabric, iron grille, marble, metal, obsidian, parquet, pavers, plank, rock,
+shingle, solar panel, stained glass, stucco, thatch, truchet, wainscoting and
+window — twenty-seven in all.
+
+Four of those are alpha cards (chain link, iron grille, stained glass and
+window). They bake through the same driver under `SurfaceOptions::card`, which
+dilates the material under the silhouette and clamps normals at its edge;
+weathering *reads* a card's transparent texels, so wires and bars still read as
+convex, but never writes them, so no halo appears outside the silhouette.
 
 Natural surfaces are deliberately excluded — sand, snow, moss, bark and their
 kin already read as weathered, and a second ageing pass over them fights the
-generator rather than helping it. `plank` is the one gap: it still hand-rolls
-its pixel loop instead of using the surface driver, so it cannot be handed a
-config yet.  Every layer
-defaults to an amount of zero, so an untouched block leaves the material
-exactly as the generator drew it and costs nothing to bake.
+generator rather than helping it; `bark`, `leaf`, `log_end` and `twig` are the
+four modules still hand-rolling a pixel loop, and nothing is waiting on them.
+Every layer defaults to an amount of zero, so an untouched block leaves the
+material exactly as the generator drew it and costs nothing to bake.
 
 Layers are applied in the order material actually ages: edge wear rubs raised
 arrises back to the substrate, corrosion creeps out of crevices (adding its own
@@ -1103,6 +1110,56 @@ let config = RockConfig {
     ..Default::default()
 };
 ```
+
+#### De-repetition (shared)
+
+`hex_blend` is a bake-time operator rather than a generator: it takes any
+finished tileable `TextureMap` as an *example* and rebuilds it as a tile with
+no structure wider than a chosen hexagonal cell.  A hexagonal lattice covers
+the output, each vertex shows the example through its own randomly placed
+window, and every texel blends the three vertices around it in a per-channel
+Gaussianised space with variance-preserving weights (Heitz & Neyret's
+histogram-preserving blend), so the result keeps the example's histogram and
+contrast instead of going grey.  Albedo, normal (renormalised afterwards),
+ORM and emissive are all blended the same way, and the output tiles exactly.
+
+```rust
+use bevy_symbios_texture::hex_blend::{HexBlendConfig, hex_blend};
+use bevy_symbios_texture::rock::{RockConfig, RockGenerator};
+use bevy_symbios_texture::{TextureGenerator, TextureMap};
+
+// An oversized example gives every window different content to show; scale
+// the config's feature counts by the same factor so features keep their
+// texel size.
+let example = RockGenerator::new(RockConfig::default()).generate(768, 768)?;
+let tile = hex_blend(
+    &example,
+    &HexBlendConfig {
+        seed: 7,
+        cells: 8.0,          // the widest structure that survives at full strength
+        blend_exponent: 1.0, // 1 for stochastic materials; ~8 keeps stones whole
+    },
+    512,
+    512,
+)?;
+// The result carries one mip level: build the chain on the tile, not the example.
+let tile = TextureMap::with_mips(tile);
+```
+
+Be precise about what it buys.  A same-size blend *softens* a repeat rather
+than removing it: with the default eight cells the contrast of structure wider
+than two cells drops to half the example's while total contrast is held
+(1.03×), so the marching read of a tile laid across hundreds of metres goes
+from obvious to faint.  Removing the repeat within an extent means baking a
+*larger* tile from the same example — the period doubles per doubling of the
+output, at four times the texture memory — which is a per-material call.
+Stochastic materials (rock, ground, sand) take the default exponent;
+structured ones (cobblestone, pavers) ghost at `1` and keep their stones whole
+with narrow seams at around `8`.  The fit needs a continuous histogram: a
+flat-shaded example with a dozen distinct values per channel drifts by up to
+9%, where a rock example comes back within 0.9%.  Cost is bake time only —
+512² from a 768² example in about 19 ms in a release build, 256² from 384² in
+9 ms, 1024² from 1536² in 77 ms — and nothing at run time.
 
 ### Alpha-masked cards
 
@@ -1197,6 +1254,7 @@ let config = WindowConfig {
     glass_opacity: 0.30,     // glass alpha [0 = clear, 1 = frosted/opaque]
     grime_level: 0.15,       // grime/dirt noise on glass [0, 1]
     color_frame: [0.85, 0.82, 0.78],
+    weathering: Default::default(),  // see "Weathering (shared)" above
     normal_strength: 3.0,
 };
 ```
@@ -1217,6 +1275,7 @@ let config = StainedGlassConfig {
     saturation: 0.85,      // glass colour saturation [0.5, 1.0]
     glass_roughness: 0.06, // glass surface waviness [0, 0.15]
     grime_level: 0.12,     // grime/dirt accumulation on glass [0, 0.5]
+    weathering: Default::default(),  // see "Weathering (shared)" above
     normal_strength: 2.5,
 };
 ```
@@ -1238,6 +1297,7 @@ let config = IronGrilleConfig {
     rust_level: 0.30,      // rust at joints [0, 1]
     color_iron: [0.14, 0.13, 0.13],
     color_rust: [0.42, 0.22, 0.08],
+    weathering: Default::default(),  // see "Weathering (shared)" above
     normal_strength: 3.5,
 };
 ```
@@ -1259,6 +1319,7 @@ let config = ChainLinkConfig {
     rust_level: 0.2,       // crossing rust [0, 1]
     color_wire: [0.62, 0.64, 0.66],
     color_rust: [0.45, 0.24, 0.10],
+    weathering: Default::default(),  // see "Weathering (shared)" above
     normal_strength: 3.0,
 };
 ```

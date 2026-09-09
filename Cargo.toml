@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."
@@ -23,11 +23,15 @@ default = []
 egui = ["dep:bevy_egui"]
 
 [dependencies]
-symbios-texture = "0.5"
+symbios-texture = "0.7"
 bevy = "0.19"
 bevy_egui = { version = "0.41", optional = true }
 noise = "0.9"
-rand = "0.9"
+# Default features off: nothing here asks for OS entropy. `rand::Rng` is the
+# bound the genetics impls take, and the tests and the viewer example seed a
+# `StdRng` (`std_rng`); `thread_rng`/`os_rng` would only hand every consumer a
+# `getrandom` requirement on wasm (symbios-overlands #1172, finding 70).
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
 rayon = "1.11"
 serde = { version = "1.0", features = ["derive", "rc"] }
 symbios-genetics = "0.2"

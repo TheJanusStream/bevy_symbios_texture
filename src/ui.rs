@@ -436,6 +436,7 @@ fn u32_instant(ui: &mut egui::Ui, val: &mut u32, label: &str, wb: &mut bool, reg
 
 #[cfg(test)]
 mod tests {
+    use bevy_egui::egui;
     use symbios_texture::for_each_texture_field;
 
     /// A `layout` list decides what a panel draws, so a field missing from one
@@ -519,5 +520,113 @@ mod tests {
              this count drops, a layout list was removed and that panel \
              silently reordered."
         );
+    }
+
+    /// Renders a config's editor in a headless `egui` pass and returns every
+    /// string the panel actually drew, sub-editors included.
+    ///
+    /// Reading the emitted text shapes is the only way to answer "is this
+    /// control on screen"; a registry row proves the widget was *generated*,
+    /// not that anything invokes it.
+    fn drawn_text(mut render: impl FnMut(&mut egui::Ui)) -> Vec<String> {
+        fn collect(shape: &egui::epaint::Shape, out: &mut Vec<String>) {
+            match shape {
+                egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| collect(s, out)),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        // Every editor wraps its rows in a `CollapsingHeader`, which starts
+        // closed and so draws nothing but its own title. This is egui's own
+        // documented testing lever: `openness` short-circuits to 1.0 for every
+        // collapsible while it is set.
+        ctx.memory_mut(|m| m.set_everything_is_visible(true));
+        // Two passes: egui sizes a collapsing body on the pass after it opens,
+        // so a single pass can miss text that is genuinely on screen.
+        let mut out = Vec::new();
+        for _ in 0..2 {
+            let full = ctx.run_ui(egui::RawInput::default(), &mut render);
+            out.clear();
+            for clipped in &full.shapes {
+                collect(&clipped.shape, &mut out);
+            }
+        }
+        out
+    }
+
+    /// `symbios-texture` 0.7.0 gave five more configs a `weathering` block, and
+    /// the claim that a registry-driven editor picks such a field up "for
+    /// free" was worth an instrument rather than an argument.
+    ///
+    /// [`every_layout_lists_every_editable_field`] cannot make it: it only
+    /// examines configs that carry a `layout` list, and none of these five
+    /// does. So this renders each panel headlessly and looks for controls that
+    /// exist nowhere but under [`WeatheringConfig`](symbios_texture::weathering::WeatheringConfig).
+    #[test]
+    fn every_config_that_weathers_draws_its_weathering_controls() {
+        use symbios_texture::chain_link::ChainLinkConfig;
+        use symbios_texture::iron_grille::IronGrilleConfig;
+        use symbios_texture::plank::PlankConfig;
+        use symbios_texture::stained_glass::StainedGlassConfig;
+        use symbios_texture::window::WindowConfig;
+
+        // Labels that appear only in the weathering sub-editors, one per
+        // sub-struct, so a partially-wired block fails too.
+        const WEATHER_ONLY: [&str; 4] = [
+            "Substrate Color", // EdgeWear
+            "Barrier Scale",   // Corrosion
+            "Grime Color",     // CreviceDirt
+            "Stain Color",     // Streaks
+        ];
+
+        let id = egui::Id::new("weathering_probe");
+        let panels: [(&str, Vec<String>); 5] = [
+            (
+                "plank",
+                drawn_text(|ui| {
+                    super::plank_config_editor(ui, &mut PlankConfig::default(), id);
+                }),
+            ),
+            (
+                "chain_link",
+                drawn_text(|ui| {
+                    super::chain_link_config_editor(ui, &mut ChainLinkConfig::default(), id);
+                }),
+            ),
+            (
+                "iron_grille",
+                drawn_text(|ui| {
+                    super::iron_grille_config_editor(ui, &mut IronGrilleConfig::default(), id);
+                }),
+            ),
+            (
+                "stained_glass",
+                drawn_text(|ui| {
+                    super::stained_glass_config_editor(ui, &mut StainedGlassConfig::default(), id);
+                }),
+            ),
+            (
+                "window",
+                drawn_text(|ui| {
+                    super::window_config_editor(ui, &mut WindowConfig::default(), id);
+                }),
+            ),
+        ];
+
+        for (name, drawn) in &panels {
+            // Control: the panel drew *something*, so an empty result cannot
+            // pass the check below vacuously.
+            assert!(
+                !drawn.is_empty(),
+                "{name}'s editor drew no text at all — the probe is broken, not the panel"
+            );
+            for label in WEATHER_ONLY {
+                assert!(
+                    drawn.iter().any(|t| t == label),
+                    "{name}'s panel is missing the weathering control {label:?};                      drew {drawn:?}"
+                );
+            }
+        }
     }
 }
