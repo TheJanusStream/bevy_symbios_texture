@@ -444,13 +444,14 @@ const GOLDEN_BRICK_VARIED: u64 = 0x5dd4_30c4_7b79_4145;
 // base `octaves` count (accepted drift, issue #78).
 const GOLDEN_BARK_DEFAULT: u64 = 0x8433_25c5_18fe_7eb3;
 const GOLDEN_BARK_VARIED: u64 = 0x8e3c_0a26_cc91_3674;
-// Re-blessed for `symbios-texture` 0.7.0.  0.6.0 moved plank onto the
-// `SurfaceCell` driver byte-for-byte by preserving the old loop's truncated
-// joint byte (`(0.92 * 255.0) as u8` = 234, where `surface::pack_texel`
-// rounds); 0.7.0 harmonised it to the rounded 235 (its #18), which moves both
-// rows and nothing else.
-const GOLDEN_PLANK_DEFAULT: u64 = 0x317f_2908_1aba_2cc1;
-const GOLDEN_PLANK_VARIED: u64 = 0x8b18_3859_5ed1_ff38;
+// Re-blessed for `symbios-texture` 0.8.0, whose Plank grain runs along its
+// boards instead of across them (its #23): the grain FBM's two frequencies
+// swapped and the warp moved onto V, sampled on a circle in U.  An intended
+// visual change; every other row here held across the same release, which
+// also collapsed the generators' private `cell_hash` copies into one.
+// (0.7.0 had re-blessed both rows for the rounded joint byte, its #18.)
+const GOLDEN_PLANK_DEFAULT: u64 = 0x4c10_daed_6f19_af62;
+const GOLDEN_PLANK_VARIED: u64 = 0x4f5a_e188_a6dd_88d6;
 
 // Captured on `symbios-texture` 0.6.0 for the four alpha-card generators, and
 // unmoved by the 0.7.0 port that put them on the shared surface driver.

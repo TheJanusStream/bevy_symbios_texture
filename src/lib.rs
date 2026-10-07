@@ -17,8 +17,8 @@
 //! **Tileable surface textures** (bark, rock, ground, brick, plank, concrete,
 //! metal, shingle, pavers, stucco, ashlar, cobblestone, thatch, marble,
 //! corrugated, asphalt, wainscoting, encaustic, fabric, sand, snow, ice,
-//! lava, moss, lichen, cactus skin): wrap seamlessly via toroidal 4-D noise
-//! mapping.  Upload with [`map_to_images`] to get repeat-wrapping samplers.
+//! lava, moss, lichen, cactus skin, roof tile, log wall, dry stone, fur):
+//! wrap seamlessly via toroidal 4-D noise mapping.  Upload with [`map_to_images`] to get repeat-wrapping samplers.
 //! `lava` additionally produces an emissive (glow) map.
 //!
 //! **Alpha-masked cards** (leaf, twig, window, stained_glass, iron_grille,
@@ -84,7 +84,7 @@
 // docs.rs builds with `--cfg docsrs` on nightly, which is what puts the
 // "available on crate feature `egui`" badge on the gated items. Inert
 // everywhere else.
-#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 // Re-export the entire Bevy-free core so the public module paths
 // (`bevy_symbios_texture::ashlar`, `::sprite`, `::genetics`, …) and every

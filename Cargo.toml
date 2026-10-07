@@ -1,6 +1,6 @@
 [package]
 name = "bevy_symbios_texture"
-version = "0.12.0"
+version = "0.13.0"
 edition = "2024"
 authors = ["Janus"]
 description = "Algorithmic texture generator for Bevy."
@@ -23,7 +23,7 @@ default = []
 egui = ["dep:bevy_egui"]
 
 [dependencies]
-symbios-texture = "0.7"
+symbios-texture = "0.8"
 bevy = "0.19"
 bevy_egui = { version = "0.41", optional = true }
 noise = "0.9"
@@ -56,6 +56,9 @@ name = "bench_main"
 harness = false
 
 [lints.rust]
+# Every public item is documented (measured at 0 missing with all features
+# when this went in, overlands #1172); keep it that way.
+missing_docs = "warn"
 # Set by docs.rs only; see the attribute at the top of `src/lib.rs`.
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(docsrs)'] }
 

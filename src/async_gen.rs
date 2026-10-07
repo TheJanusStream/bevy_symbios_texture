@@ -62,6 +62,7 @@ impl Default for AsyncTextureConfig {
 }
 
 /// Resolves the requested thread-count to an actual count.
+#[cfg(not(target_arch = "wasm32"))]
 fn resolve_pool_threads(cfg: &AsyncTextureConfig) -> usize {
     if cfg.pool_threads == 0 {
         std::thread::available_parallelism()
@@ -73,6 +74,11 @@ fn resolve_pool_threads(cfg: &AsyncTextureConfig) -> usize {
 }
 
 static POOL_CONFIG: OnceLock<AsyncTextureConfig> = OnceLock::new();
+// The pool is native-only, like the `spawn_task` that uses it: on wasm32
+// generation goes to Bevy's `AsyncComputeTaskPool`, and the pool's four
+// items were dead code there - an error under the `-D warnings` a wasm
+// check runs with.
+#[cfg(not(target_arch = "wasm32"))]
 static POOL: OnceLock<Option<rayon::ThreadPool>> = OnceLock::new();
 
 /// Returned by [`set_pool_config`] when a configuration has already been
@@ -105,6 +111,7 @@ pub fn set_pool_config(cfg: AsyncTextureConfig) -> Result<(), PoolConfigAlreadyS
 /// back to running the closure synchronously on the calling thread so texture
 /// generation continues to work — slowly, but correctly — instead of panicking
 /// at startup.
+#[cfg(not(target_arch = "wasm32"))]
 fn build_pool(cfg: &AsyncTextureConfig) -> Option<rayon::ThreadPool> {
     let n = resolve_pool_threads(cfg);
     match rayon::ThreadPoolBuilder::new()
@@ -142,6 +149,7 @@ fn build_pool(cfg: &AsyncTextureConfig) -> Option<rayon::ThreadPool> {
 /// Isolated from the application's global rayon pool so texture work does not
 /// starve unrelated parallel workloads and the concurrency cap is enforced
 /// regardless of the calling application's rayon configuration.
+#[cfg(not(target_arch = "wasm32"))]
 fn gen_pool() -> Option<&'static rayon::ThreadPool> {
     POOL.get_or_init(|| {
         let cfg = POOL_CONFIG.get().cloned().unwrap_or_default();

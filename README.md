@@ -1064,6 +1064,115 @@ let config = TruchetConfig {
 };
 ```
 
+#### Roof tile
+
+Clay roof tiles in columns down the slope and courses across it.  `barrel`
+blends a pantile's smooth S-wave (`0`) into a barrel tile's half-round caps
+over wide concave pans (`1`: Roman, Spanish, kawara).  V runs down the
+slope, as an image does: each course's butt stands proud of the course
+below by `course_step` and shadows its head.  Courses round to an even
+count so a `stagger` wraps.
+
+```rust
+use bevy_symbios_texture::roof_tile::RoofTileConfig;
+
+let config = RoofTileConfig {
+    seed: 42,
+    columns: 6.0,          // tile columns across the panel [2, 16]
+    courses: 6.0,          // courses down it [2, 16], rounded to even
+    barrel: 0.7,           // 0 pantile wave .. 1 half-round barrel caps
+    course_step: 0.6,      // butt over the course below [0, 1]
+    stagger: 0.0,          // clay tiles run straight down the roof
+    cell_variance: 0.35,   // per-tile kiln patchwork
+    glaze: 0.0,            // 1 = glossy glazed tile
+    moss_level: 0.1,       // moss in the pans under each butt
+    color_tile: [0.50, 0.17, 0.08],
+    color_shadow: [0.06, 0.03, 0.02],
+    ..Default::default()
+};
+```
+
+#### Log wall
+
+Round logs stacked along V and running the length of U, with chinking
+between them: a cabin's wall, or a palisade turned a quarter.  Logs vary in
+diameter and wander gently along their length without ever crowding a
+neighbour; peeled wood shows its grain along the log and drying checks
+under patches of fissured bark.
+
+```rust
+use bevy_symbios_texture::log_wall::LogWallConfig;
+
+let config = LogWallConfig {
+    seed: 42,
+    log_count: 5.0,        // logs up the panel [2, 12]
+    chinking_width: 0.12,  // fraction of a log's band [0, 0.4]
+    log_variance: 0.5,     // diameter and wander
+    bark: 0.3,             // share of the logs still in their bark
+    grain_scale: 10.0,     // grain lines across a log
+    crack_density: 0.4,    // drying checks on the peeled wood
+    color_wood_light: [0.50, 0.34, 0.18],
+    color_wood_dark: [0.26, 0.16, 0.08],
+    color_bark: [0.13, 0.09, 0.06],
+    color_chinking: [0.52, 0.49, 0.43],
+    ..Default::default()
+};
+```
+
+#### Dry stone
+
+Irregular stones in rough courses with deep, unmortared gaps: field walls,
+sheepfolds, terraces.  Course heights wander, each course is cut into
+stones of random length from its own offset, and each stone has a lumpy
+outline, a tilted and bumped face, a tone between two colours and lichen on
+its upper face.  For cut, mortared blocks use Ashlar.
+
+```rust
+use bevy_symbios_texture::dry_stone::DryStoneConfig;
+
+let config = DryStoneConfig {
+    seed: 42,
+    courses: 8,            // [3, 20]
+    stones_per_course: 5,  // on average [2, 12]
+    course_jitter: 0.5,
+    gap_width: 0.12,       // fraction of a course's height [0, 0.3]
+    irregularity: 0.6,     // rough outlines, uneven heights
+    face_relief: 0.5,
+    cell_variance: 0.5,    // tone, and how much of the second colour
+    moss_level: 0.15,      // lichen on the upper faces
+    color_stone: [0.36, 0.35, 0.33],
+    color_stone_alt: [0.40, 0.33, 0.24],
+    color_gap: [0.03, 0.03, 0.03],
+    ..Default::default()
+};
+```
+
+#### Fur
+
+Strands drawn one by one into a z-buffer, hanging down V at angles a flow
+field and their lock give them, each coloured from root to tip over a dark
+undercoat.  `curl` takes the coat from straight hair to a sheep's fleece of
+short tight arcs in small domed locks; `patches` lays a pied second colour
+over it.  A natural surface, so no weathering block.
+
+```rust
+use bevy_symbios_texture::fur::FurConfig;
+
+let config = FurConfig {
+    seed: 42,
+    density: 28.0,         // strands across the panel [8, 64]
+    length: 0.5,           // stubble 0.05 .. long hair 1
+    curl: 0.0,             // 1 = curled fleece
+    clumping: 0.5,         // locks and tufts
+    flow: 0.4,             // how far the strands' direction wanders
+    color_root: [0.08, 0.05, 0.03],
+    color_tip: [0.40, 0.26, 0.14],
+    patches: 0.0,          // a Holstein is about 0.45 with a white patch
+    color_patch: [0.80, 0.78, 0.72],
+    normal_strength: 3.0,
+};
+```
+
 #### Weathering (shared)
 
 Every generator depicting a **built or dressed** surface carries an optional
