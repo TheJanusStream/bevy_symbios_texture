@@ -20,13 +20,13 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use bevy::asset::Assets;
+use bevy::asset::{Asset, Assets};
 use bevy::ecs::component::Component;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::{Commands, Query, ResMut};
 use bevy::image::Image;
 use bevy::math::{Affine2, Vec2};
-use bevy::pbr::StandardMaterial;
+use bevy::pbr::{ExtendedMaterial, Material, MaterialExtension, StandardMaterial};
 use bevy::prelude::{AlphaMode, Color, Handle, LinearRgba};
 use bevy::render::render_resource::Face;
 
@@ -366,23 +366,73 @@ impl MaterialSettings {
     }
 }
 
+/// A material whose texture slots are a [`StandardMaterial`]'s, so the patch
+/// systems can write a finished bake into it.
+///
+/// Implemented for `StandardMaterial` itself and for an [`ExtendedMaterial`]
+/// over one: a material that adds its own shader work (weather, a dissolve,
+/// a tint) on top of the standard PBR inputs still takes its textures where
+/// a `StandardMaterial` would.  A consumer's own material implements it by
+/// handing out the `StandardMaterial` it carries.
+pub trait PatchableMaterial: Asset {
+    /// The `StandardMaterial` whose slots receive the generated images.
+    fn standard_mut(&mut self) -> &mut StandardMaterial;
+}
+
+impl PatchableMaterial for StandardMaterial {
+    fn standard_mut(&mut self) -> &mut StandardMaterial {
+        self
+    }
+}
+
+impl<B: Material + PatchableMaterial, E: MaterialExtension> PatchableMaterial
+    for ExtendedMaterial<B, E>
+{
+    fn standard_mut(&mut self) -> &mut StandardMaterial {
+        self.base.standard_mut()
+    }
+}
+
 /// Marker for an in-flight procedural-texture task whose result should be
-/// patched directly onto a [`StandardMaterial`].
+/// patched directly onto a material: a [`StandardMaterial`] unless `M` names
+/// another [`PatchableMaterial`].
 ///
 /// Spawned alongside a [`PendingTexture`] by
 /// [`build_procedural_material_async`].  Consumed by
-/// [`patch_procedural_material_textures`].  Removing or despawning the entity
-/// before completion cancels the task (via `PendingTexture`'s drop flag) and
-/// leaves the material untouched.
+/// [`patch_procedural_material_textures`] for a `StandardMaterial`, and by
+/// [`patch_material_textures::<M>`](patch_material_textures) for any other
+/// `M`, which whoever spawns such a task registers.  Removing or despawning
+/// the entity before completion cancels the task (via `PendingTexture`'s drop
+/// flag) and leaves the material untouched.
+///
+/// The task is its patch system's alone, for every `M`: the [`PatchTask`]
+/// this component brings keeps
+/// [`poll_texture_tasks`](crate::async_gen::poll_texture_tasks) off the
+/// entity, and stays when this component is taken off it, so despawn the
+/// entity rather than strip it.
 #[derive(Component)]
-pub struct PatchMaterialTextures {
+#[require(PatchTask)]
+pub struct PatchMaterialTextures<M: PatchableMaterial = StandardMaterial> {
     /// Material whose `base_color_texture` / `normal_map_texture` /
-    /// `metallic_roughness_texture` slots receive the generated images.
-    pub target: Handle<StandardMaterial>,
+    /// `metallic_roughness_texture` slots receive the generated images, and
+    /// whose `emissive_texture` is set or cleared with the bake's glow map
+    /// (see [`apply_generated_handles`]).  For a material other than a
+    /// `StandardMaterial` these are the slots of the one
+    /// [`PatchableMaterial::standard_mut`] hands out.
+    pub target: Handle<M>,
     /// Cache key the result should be stored under, when a [`TextureCache`]
     /// is present.  `None` disables caching for this task.
     pub cache_key: Option<TextureCacheKey>,
 }
+
+/// On every patch task, whatever its material: required by each
+/// [`PatchMaterialTextures`], and what
+/// [`poll_texture_tasks`](crate::async_gen::poll_texture_tasks) filters on to
+/// leave such a task to its patch system.  A filter on
+/// `PatchMaterialTextures` itself names one material, and a task for any
+/// other would race the poller for the bake.
+#[derive(Component, Default)]
+pub struct PatchTask;
 
 /// Assign a generator-produced emissive map to `material`, defaulting the
 /// emissive *factor* so the glow is actually visible.
@@ -543,19 +593,44 @@ pub fn build_procedural_material_async(
 }
 
 /// Bevy system — drains finished [`PendingTexture`]s tagged with
-/// [`PatchMaterialTextures`] and writes the generated images straight into
-/// the target material's albedo / normal / ORM slots.
+/// [`PatchMaterialTextures`] for a `StandardMaterial` and writes the
+/// generated images straight into the target material's albedo / normal /
+/// ORM slots.
 ///
 /// Registered automatically by
 /// [`SymbiosTexturePlugin`](crate::SymbiosTexturePlugin) alongside the
 /// generic [`poll_texture_tasks`](crate::async_gen::poll_texture_tasks).
-/// The two systems are mutually exclusive: an entity with
-/// `PatchMaterialTextures` is consumed here and never reaches the generic
-/// poller (which only handles bare `PendingTexture` entities).
+/// The two systems are mutually exclusive: an entity with a
+/// `PatchMaterialTextures`, for this material or any other, never reaches
+/// the generic poller (which only handles bare `PendingTexture` entities),
+/// and the `StandardMaterial` ones are consumed here.
+///
+/// This is [`patch_material_textures`] for a `StandardMaterial`, under the
+/// name it has always had.
 pub fn patch_procedural_material_textures(
-    mut commands: Commands,
+    commands: Commands,
     tasks: Query<(Entity, &PendingTexture, &PatchMaterialTextures)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+    images: ResMut<Assets<Image>>,
+    cache: Option<ResMut<TextureCache>>,
+) {
+    patch_material_textures(commands, tasks, materials, images, cache);
+}
+
+/// Bevy system - [`patch_procedural_material_textures`] for any
+/// [`PatchableMaterial`] `M`: drains finished [`PendingTexture`]s tagged with
+/// a [`PatchMaterialTextures<M>`] and writes the generated images into the
+/// target's [`StandardMaterial`] slots, leaving the rest of the material
+/// (an extension's uniforms, say) as it was.
+///
+/// The plugin registers it for `StandardMaterial` alone. A consumer that
+/// spawns a task for another material registers it for that one, as
+/// `app.add_systems(Update, patch_material_textures::<M>)`, once per type.
+/// Until it does, nothing polls those tasks: their bakes finish and wait.
+pub fn patch_material_textures<M: PatchableMaterial>(
+    mut commands: Commands,
+    tasks: Query<(Entity, &PendingTexture, &PatchMaterialTextures<M>)>,
+    mut materials: ResMut<Assets<M>>,
     mut images: ResMut<Assets<Image>>,
     mut cache: Option<ResMut<TextureCache>>,
 ) {
@@ -582,7 +657,7 @@ pub fn patch_procedural_material_textures(
                     // Also defaults the emissive factor to white when a glow
                     // map is present (and undoes it when one is not), so the
                     // map is visible without the caller configuring emission.
-                    apply_generated_handles(&mut mat, &handles);
+                    apply_generated_handles(mat.standard_mut(), &handles);
                 }
                 commands.entity(entity).despawn();
             }
@@ -1271,5 +1346,129 @@ mod tests {
             LinearRgba::WHITE,
             "emissive factor must auto-default to white so the glow shows"
         );
+    }
+
+    /// An extension with a value of its own, so a test can see a patch
+    /// leave it as it was.
+    #[derive(Asset, bevy::render::render_resource::AsBindGroup, bevy::reflect::Reflect, Clone)]
+    struct Tint {
+        #[uniform(100)]
+        strength: f32,
+    }
+
+    impl MaterialExtension for Tint {}
+
+    type Tinted = ExtendedMaterial<StandardMaterial, Tint>;
+
+    /// A task for an extended material is left alone by the generic poller,
+    /// which used to filter on the `StandardMaterial` patch only and so would
+    /// have taken this bake as a `TextureReady`, and the patch registered for
+    /// that material writes it into the base's slots, the glow factor with
+    /// them, leaving the extension as it was.
+    #[test]
+    fn a_patch_task_for_an_extended_material_lands_in_its_base() {
+        use crate::async_gen::{TextureReady, poll_texture_tasks};
+        use bevy::ecs::schedule::Schedule;
+
+        let mut world = World::new();
+        world.insert_resource(Assets::<Tinted>::default());
+        world.insert_resource(Assets::<Image>::default());
+        let target = world.resource_mut::<Assets<Tinted>>().add(Tinted {
+            base: StandardMaterial::default(),
+            extension: Tint { strength: 0.25 },
+        });
+        world.spawn((
+            PendingTexture::finished(Ok(flat_map(4, 4, true)), false),
+            PatchMaterialTextures {
+                target: target.clone(),
+                cache_key: None,
+            },
+        ));
+
+        let mut poller = Schedule::default();
+        poller.add_systems(poll_texture_tasks);
+        poller.run(&mut world);
+        assert_eq!(
+            world.query::<&TextureReady>().iter(&world).count(),
+            0,
+            "the generic poller passed the task over"
+        );
+        assert_eq!(world.query::<&PendingTexture>().iter(&world).count(), 1);
+
+        let mut patch = Schedule::default();
+        patch.add_systems(patch_material_textures::<Tinted>);
+        patch.run(&mut world);
+        let mat = world.resource::<Assets<Tinted>>().get(&target).unwrap();
+        assert!(mat.base.base_color_texture.is_some());
+        assert!(mat.base.normal_map_texture.is_some());
+        assert!(mat.base.metallic_roughness_texture.is_some());
+        assert!(mat.base.emissive_texture.is_some());
+        assert_eq!(mat.base.emissive, LinearRgba::WHITE, "the glow shows");
+        assert_eq!(mat.extension.strength, 0.25, "the extension is untouched");
+        assert_eq!(
+            world.query::<&PendingTexture>().iter(&world).count(),
+            0,
+            "the task is done"
+        );
+    }
+
+    /// The patch writes through a tracked borrow, so the material goes out
+    /// as `AssetEvent::Modified` and the renderer prepares it again with its
+    /// textures; an untracked write (`get_mut_untracked`) would leave it
+    /// drawn without them for good.
+    #[test]
+    fn a_patched_material_is_announced_as_modified() {
+        use bevy::app::{App, Update};
+        use bevy::asset::{AssetApp, AssetEvent, AssetPlugin};
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::MinimalPlugins;
+
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<Tinted>()
+            .add_systems(Update, patch_material_textures::<Tinted>);
+        let target = app
+            .world_mut()
+            .resource_mut::<Assets<Tinted>>()
+            .add(Tinted {
+                base: StandardMaterial::default(),
+                extension: Tint { strength: 0.25 },
+            });
+        // Its `Added` goes out on this update, while there is no task yet.
+        app.update();
+        app.world_mut().spawn((
+            PendingTexture::finished(Ok(flat_map(4, 4, false)), false),
+            PatchMaterialTextures {
+                target: target.clone(),
+                cache_key: None,
+            },
+        ));
+        app.update();
+
+        let events = app.world().resource::<Messages<AssetEvent<Tinted>>>();
+        assert!(
+            events
+                .iter_current_update_messages()
+                .any(|event| *event == AssetEvent::Modified { id: target.id() }),
+            "the patch announces the material it changed"
+        );
+        let mat = app.world().resource::<Assets<Tinted>>().get(&target);
+        assert!(mat.is_some_and(|m| m.base.base_color_texture.is_some()));
+    }
+
+    /// An extension over an extension still hands out the innermost
+    /// `StandardMaterial`.
+    #[test]
+    fn an_extension_over_an_extension_patches_the_innermost_base() {
+        let mut nested = ExtendedMaterial {
+            base: Tinted {
+                base: StandardMaterial::default(),
+                extension: Tint { strength: 0.0 },
+            },
+            extension: Tint { strength: 1.0 },
+        };
+        nested.standard_mut().perceptual_roughness = 0.125;
+        assert_eq!(nested.base.base.perceptual_roughness, 0.125);
     }
 }

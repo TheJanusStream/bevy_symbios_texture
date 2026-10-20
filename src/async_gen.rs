@@ -218,6 +218,21 @@ impl Drop for PendingTexture {
     }
 }
 
+#[cfg(test)]
+impl PendingTexture {
+    /// A task whose bake has already landed: `result` waits in its channel
+    /// for the first poll, so a test decides which system meets it first.
+    pub(crate) fn finished(result: Result<TextureMap, TextureError>, is_card: bool) -> Self {
+        let (tx, rx) = mpsc::sync_channel(1);
+        tx.send(result).expect("the channel has room for one");
+        PendingTexture {
+            rx: std::sync::Mutex::new(rx),
+            cancelled: Arc::new(AtomicBool::new(false)),
+            is_card,
+        }
+    }
+}
+
 /// Shared constructor body: creates the channel + cancellation flag, spawns the
 /// task, and returns a `PendingTexture`.  The closure `f` is the generator call.
 /// Native Desktop: Spawn using our private, bounded Rayon pool.
@@ -337,16 +352,15 @@ pub struct TextureReady(pub GeneratedHandles);
 
 /// Bevy system — polls pending generation tasks and uploads finished maps.
 ///
-/// Skips entities also tagged with [`PatchMaterialTextures`](crate::material::PatchMaterialTextures);
-/// those are consumed by [`patch_procedural_material_textures`](crate::material::patch_procedural_material_textures)
-/// instead, which writes the generated images directly into a target
-/// `StandardMaterial` rather than emitting [`TextureReady`].
+/// Skips entities also tagged with a [`PatchMaterialTextures`](crate::material::PatchMaterialTextures),
+/// for any material; those are consumed by [`patch_procedural_material_textures`](crate::material::patch_procedural_material_textures)
+/// (or [`patch_material_textures`](crate::material::patch_material_textures)
+/// for a material other than `StandardMaterial`) instead, which writes the
+/// generated images directly into the target material rather than emitting
+/// [`TextureReady`].
 pub fn poll_texture_tasks(
     mut commands: Commands,
-    tasks: Query<
-        (Entity, &PendingTexture),
-        bevy::ecs::query::Without<crate::material::PatchMaterialTextures>,
-    >,
+    tasks: Query<(Entity, &PendingTexture), bevy::ecs::query::Without<crate::material::PatchTask>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     for (entity, pending) in &tasks {

@@ -155,6 +155,34 @@ same bodies rather than a copy that drifts.
 `uv_transform` is set to a uniform scale of `uv_scale`; a caller with its own UV
 offset/rotation convention overwrites that one field after the call.
 
+#### Patching another material
+
+The patch is not tied to `StandardMaterial`. It writes into any material that
+implements `PatchableMaterial`, the trait that hands out the
+`StandardMaterial` whose slots take the textures. `StandardMaterial`
+implements it, and so does an `ExtendedMaterial` over one; a material of your
+own implements it by returning the `StandardMaterial` it carries. A task
+tagged `PatchMaterialTextures<M>` for such a material is written by
+`patch_material_textures::<M>`. The plugin registers that system for
+`StandardMaterial` only, so register it for your own type:
+
+```rust
+type Weathered = ExtendedMaterial<StandardMaterial, WeatherExtension>;
+
+app.add_systems(Update, patch_material_textures::<Weathered>);
+
+// Later, with `weathered: Handle<Weathered>`:
+if let Some(pending) = TextureConfig::Brick(BrickConfig::default()).spawn(512, 512) {
+    commands.spawn((
+        pending,
+        PatchMaterialTextures { target: weathered.clone(), cache_key: None },
+    ));
+}
+```
+
+The bake lands in the base's slots. The extension's own fields are left as
+they were.
+
 ### Texture cache
 
 To avoid regenerating the same `(generator, config, size)` tuple across

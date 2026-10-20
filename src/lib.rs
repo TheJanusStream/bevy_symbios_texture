@@ -67,6 +67,12 @@
 //! in once the background task completes.  Pair with an optional
 //! [`TextureCache`] resource to avoid regenerating identical configs.
 //!
+//! The patch is not tied to `StandardMaterial`: a task tagged
+//! [`PatchMaterialTextures<M>`] writes into any [`PatchableMaterial`] `M`,
+//! an `ExtendedMaterial` over a `StandardMaterial` among them, once
+//! [`patch_material_textures::<M>`](patch_material_textures) is registered
+//! for it.
+//!
 //! # Animated parameters
 //! [`AnimatedProceduralMaterial`] drives time-varying texture parameters by
 //! re-evaluating a closure each frame, regenerating only when the
@@ -118,9 +124,9 @@ pub use generator::{
     map_to_images_card, map_to_images_card_with_usages, map_to_images_with_usages,
 };
 pub use material::{
-    MaterialSettings, PatchMaterialTextures, RenderProperties, TextureConfig, apply_emissive_map,
-    apply_generated_handles, build_procedural_material_async, patch_procedural_material_textures,
-    store_generated_texture_map,
+    MaterialSettings, PatchMaterialTextures, PatchTask, PatchableMaterial, RenderProperties,
+    TextureConfig, apply_emissive_map, apply_generated_handles, build_procedural_material_async,
+    patch_material_textures, patch_procedural_material_textures, store_generated_texture_map,
 };
 pub use symbios_texture::leaf::{LeafConfig, LeafGenerator, LeafSample, LeafSampler, sample_leaf};
 pub use symbios_texture::noise::ToroidalNoise;
